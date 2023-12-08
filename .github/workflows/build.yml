@@ -1,0 +1,35 @@
+name: Build package
+
+on: [ push, pull_request, workflow_dispatch ]
+
+# written referencing apollo save tool psp's CI
+
+jobs:
+  build_pkg:
+    runs-on: ubuntu-22.04
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v3
+
+      # install latest pspdev sdk
+    - name: Install mingw
+      run: |
+        sudo apt update
+        sudo apt install -y gcc-mingw-w64-i686
+
+    - name: Set env vars
+      run: |
+        echo "sha_name=$(echo ${GITHUB_SHA} | cut -c1-8)" >> $GITHUB_ENV
+
+    - name: Build asi
+      run: |
+        bash build.sh
+
+    - name: Push package artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: s4_league_fps_unlock_${{ env.sha_name }}
+        path: |
+           s4_league_fps_unlock.asi
+        if-no-files-found: error
