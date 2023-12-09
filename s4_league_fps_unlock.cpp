@@ -1,9 +1,8 @@
-#include <stdio.h>
+#include <cstdio>
 #include <fcntl.h>
 #include <unistd.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
+#include <cstdint>
+#include <cstdlib>
 #include <pthread.h>
 
 FILE *log_file = NULL;
@@ -27,11 +26,12 @@ FILE *log_file = NULL;
 
 void patch_min_frametime(double min_frametime){
 	LOG("patching minimal frametime to %f", min_frametime);
-	double *min_frametime_const = (void *)0x013d33a0;
+	double *min_frametime_const = (double *)0x013d33a0;
 	*min_frametime_const = min_frametime;
 }
 
 void *main_thread(void *arg){
+	return NULL;
 }
 
 __attribute__((constructor))
