@@ -37,8 +37,24 @@ pthread_mutex_t log_mutex;
 	#define LOG_VERBOSE(...) LOG(__VA_ARGS__)
 #else // VERBOSE
 	#define LOG_VERBOSE(...)
-#endif //VERBISE
+#endif //VERBOSE
 
+// __sync_synchronize() is not enough..?
+
+#define INIT_MEM_FENCE() \
+static bool _mem_fence_ready = 0; \
+static pthread_mutex_t _mem_fence; \
+if(!_mem_fence_ready){ \
+	if(pthread_mutex_init(&_mem_fence, NULL)){ \
+		LOG("failed to initialize mem fence for %s", __FUNCTION__); \
+		exit(1); \
+	} \
+	_mem_fence_ready = true; \
+}
+
+#define MEM_FENCE() \
+pthread_mutex_lock(&_mem_fence); \
+pthread_mutex_unlock(&_mem_fence);
 
 struct __attribute__ ((packed)) time_context{
 	double unknown;
@@ -58,24 +74,17 @@ struct __attribute__ ((packed)) game_context{
 };
 
 static struct game_context *(*fetch_game_context)(void) = (struct game_context *(*)(void)) 0x004ad790;
-static void (*update_time_delta_raw)(void) = (void (*)(void)) 0x00ff7f30;
-static void update_time_delta(struct time_context *ctx){
-	register struct time_context *ecx asm("ecx");
-	ecx = ctx;
-	update_time_delta_raw();
-}
+static void (__attribute__((thiscall)) *update_time_delta)(struct time_context *ctx) = (void (__attribute__((thiscall)) *)(struct time_context *ctx)) 0x00ff7f30;
 
-static void (*delay_and_update_time_delta_raw)(double) = (void (*)(double)) 0x00ff7fd0;
-static void delay_and_update_time_delta(struct time_context *ctx, double delay_ms){
-	register struct time_context *ecx asm("ecx");
-	ecx = ctx;
-	delay_and_update_time_delta_raw(delay_ms);
-}
+static void (__attribute__((thiscall))  *delay_and_update_time_delta)(struct time_context *, double) = (void (__attribute__((thiscall)) *)(struct time_context *, double)) 0x00ff7fd0;
+
 
 static void *(*fetch_016ed578)(void) = (void* (*)(void)) 0x01172b00;
 
-void game_tick_replica(void *ctx){
+void __attribute__((thiscall)) game_tick_replica(void *ctx){
 	LOG_VERBOSE("ctx is at 0x%08x", ctx);
+
+	INIT_MEM_FENCE();
 
 	struct time_context *tctx = (struct time_context *)((uint32_t)ctx + 0x8);
 	struct game_context *gctx = fetch_game_context();
@@ -87,136 +96,127 @@ void game_tick_replica(void *ctx){
 	int time_delta = round(tctx->delta_t);
 
 	{
-		register void *ecx asm("ecx");
 		LOG_VERBOSE("1");
-		void (*fun_00872730)(int) = (void (*)(int))0x00872730;
-		ecx = (void *)((uint32_t)ctx + 0x28);
-		fun_00872730(time_delta);
+		void (__attribute__((thiscall)) *fun_00872730)(void *, int) = (void (__attribute__((thiscall)) *)(void *, int))0x00872730;
+		void *unknown_context = (void *)((uint32_t)ctx + 0x28);
+		MEM_FENCE();
+		fun_00872730(unknown_context, time_delta);
 	}
 
 	uint32_t *dat_01642edc = (uint32_t *)0x01642edc;
 	if(*dat_01642edc != 0){
-		register void *ecx asm("ecx");
 		LOG_VERBOSE("2");
-		void (*fun_009ea0a0)(int) = (void (*)(int))0x009ea0a0;
-		ecx = (void *)*dat_01642edc;
-		fun_009ea0a0(time_delta);
+		void (__attribute__((thiscall)) *fun_009ea0a0)(void *, int) = (void (__attribute__((thiscall))*)(void *, int))0x009ea0a0;
+		void *unknown_context = (void *)*dat_01642edc;
+		MEM_FENCE();
+		fun_009ea0a0(unknown_context, time_delta);
 	}
 
 	{
-		register void *ecx asm("ecx");
 		LOG_VERBOSE("3");
-		void (*fun_009e9020)(int) = (void (*)(int))0x009e9020;
+		void (__attribute__((thiscall)) *fun_009e9020)(void *, int) = (void (__attribute__((thiscall)) *)(void *, int))0x009e9020;
 		uint32_t *dat_01642ed8 = (uint32_t *)0x01642ed8;
-		ecx = (void *)*dat_01642ed8;
-		fun_009e9020(time_delta);
+		void *unknown_context = (void *)*dat_01642ed8;
+		MEM_FENCE();
+		fun_009e9020(unknown_context, time_delta);
 	}
 
 	{
-		register void *ecx asm("ecx");
 		LOG_VERBOSE("4");
-		void (*fun)(void) = (void (*)(void)) *(uint32_t **)(*(uint32_t *)ctx + 0x38);
+		void (__attribute__((thiscall)) *fun)(void *) = (void (__attribute__((thiscall)) *)(void *)) *(uint32_t **)(*(uint32_t *)ctx + 0x38);
 		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		ecx = (void *)ctx;
-		fun();
+		MEM_FENCE();
+		fun((void *)ctx);
 	}
 
 	{
-		register void *ecx asm("ecx");
 		LOG_VERBOSE("5");
-		void (*fun_00de8cd0)(int) = (void (*)(int))0x00de8cd0;
+		void (__attribute__((thiscall)) *fun_00de8cd0)(void *, int) = (void (__attribute__((thiscall)) *)(void*, int))0x00de8cd0;
 		uint32_t *dat_01664a80 = (uint32_t *)0x01664a80;
-		ecx = (void *)*dat_01664a80;
-		fun_00de8cd0(time_delta);
+		void *unknown_context = (void *)*dat_01664a80;
+		MEM_FENCE();
+		fun_00de8cd0(unknown_context, time_delta);
 	}
 
 	{
-		register void *ecx asm("ecx");
 		LOG_VERBOSE("6");
 		void *unknown_context = fetch_016ed578();
-		void (*fun)(void) = (void (*)(void)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x4c);
+		void (__attribute__((thiscall)) *fun)(void *) = (void (__attribute__((thiscall)) *)(void *)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x4c);
 		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		ecx = unknown_context;
-		fun();
+		MEM_FENCE();
+		fun(unknown_context);
 	}
 
 	{
-		register void *ecx asm("ecx");
 		LOG_VERBOSE("7");
 		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t*)0x01642dfc + 0x10c);
-		void (*fun)(void) = (void (*)(void)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x34);
+		void (__attribute__((thiscall)) *fun)(void *) = (void (__attribute__((thiscall)) *)(void *)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x34);
 		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		ecx = unknown_context;
-		fun();
+		MEM_FENCE();
+		fun(unknown_context);
 	}
 
 	{
-		register void *ecx asm("ecx");
 		LOG_VERBOSE("8");
 		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t*)0x01642dfc + 0x10c);
-		void (*fun)(void) = (void (*)(void)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x44);
+		void (__attribute__((thiscall)) *fun)(void *) = (void (__attribute__((thiscall)) *)(void *)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x44);
 		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		ecx = unknown_context;
-		fun();
+		MEM_FENCE();
+		fun(unknown_context);
 	}
 
 	{
-		register void *ecx asm("ecx");
 		LOG_VERBOSE("9");
 		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t*)0x01642dfc + 0x198);
-		void (*fun)(int) = (void (*)(int)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x24);
+		void (__attribute__((thiscall)) *fun)(void *, int) = (void (__attribute__((thiscall)) *)(void *, int)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x24);
 		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		ecx = unknown_context;
-		fun(time_delta);
+		MEM_FENCE();
+		fun(unknown_context, time_delta);
 	}
 
 	{
-		register void *ecx asm("ecx");
 		LOG_VERBOSE("10");
 		void *unknown_context = (void *) (*(uint32_t *)0x01643190 + 0x4);
-		void (*fun)(int) = (void (*)(int)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x24);
+		void (__attribute__((thiscall)) *fun)(void*, int) = (void (__attribute__((thiscall)) *)(void *, int)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x24);
 		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		ecx = unknown_context;
-		fun(time_delta);
+		MEM_FENCE();
+		fun(unknown_context, time_delta);
 	}
 
 	{
-		register void *ecx asm("ecx");
 		LOG_VERBOSE("11");
 		double unknown_double = (time_delta % 4000) + *(double *)0x013a89b0;
 		uint32_t unknown_local_context[2];
-		void (*fun_0100a940)(float, uint32_t) = (void (*)(float, uint32_t)) 0x0100a940;
-		ecx = unknown_local_context;
-		fun_0100a940(unknown_double / *(float *)0x013ab2a0, *(uint32_t*)0x014c904c);
+		void (__attribute__((thiscall)) *fun_0100a940)(uint32_t *, float, uint32_t) = (void (__attribute__((thiscall)) *)(uint32_t *, float, uint32_t)) 0x0100a940;
+		MEM_FENCE();
+		fun_0100a940(unknown_local_context, unknown_double / *(float *)0x013ab2a0, *(uint32_t*)0x014c904c);
 		*(uint32_t*)0x016eff30 = *unknown_local_context;
 		*(uint32_t*)0x016eff34 = unknown_local_context[1];
 	}
 
 	{
-		register void *ecx asm("ecx");
-		LOG_VERBOSE("10");
+		LOG_VERBOSE("12");
 		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t *)0x01642dfc + 0x1bc);
-		void (*fun_006ea880)(int) = (void (*)(int)) 0x006ea880;
-		ecx = unknown_context;
-		fun_006ea880(time_delta);
+		void (__attribute__((thiscall)) *fun_006ea880)(void *, int) = (void (__attribute__((thiscall)) *)(void *, int)) 0x006ea880;
+		MEM_FENCE();
+		fun_006ea880(unknown_context, time_delta);
 	}
-
 }
 
 
 // function at 00871970, not essentially game tick
-static void (*orig_game_tick)(void);
-static void patched_game_tick(void){
-	register uint32_t ecx asm("ecx");
-	uint32_t ecx_copy = ecx;
+static void (__attribute__((thiscall)) *orig_game_tick)(void *);
+static void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 	LOG_VERBOSE("game tick function hook fired");
+	INIT_MEM_FENCE();
+
 	struct game_context *ctx = fetch_game_context();
 	LOG_VERBOSE("game context at 0x%08x", (uint32_t)ctx);
 	ctx->online_verbose_toggle = 1;
 	ctx->fps_limiter_toggle = 0;
-	//ecx = ecx_copy;
-	//orig_game_tick();
-	game_tick_replica((void *)ecx_copy);
+	MEM_FENCE();
+	//orig_game_tick(tick_ctx);
+	game_tick_replica(tick_ctx);
 }
 static void hook_game_tick(){
 	LOG("hooking game tick");
@@ -230,7 +230,7 @@ static void hook_game_tick(){
 	};
 	memcpy(intended_trampoline, (void *)0x00871970, 9);
 	DWORD old_protect;
-	orig_game_tick = (void (*)(void)) VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	orig_game_tick = (void (__attribute__((thiscall)) *)(void *)) VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 	if(orig_game_tick == NULL){
 		LOG("Failed allocating executable memory while preparing trampoline");
 		return;
