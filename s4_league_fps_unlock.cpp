@@ -65,17 +65,30 @@ static void update_time_delta(struct time_context *ctx){
 	update_time_delta_raw();
 }
 
+static void (*delay_and_update_time_delta_raw)(double) = (void (*)(double)) 0x00ff7fd0;
+static void delay_and_update_time_delta(struct time_context *ctx, double delay_ms){
+	register struct time_context *ecx asm("ecx");
+	ecx = ctx;
+	delay_and_update_time_delta_raw(delay_ms);
+}
+
 static void *(*fetch_016ed578)(void) = (void* (*)(void)) 0x01172b00;
 
 void game_tick_replica(void *ctx){
 	LOG_VERBOSE("ctx is at 0x%08x", ctx);
+
 	struct time_context *tctx = (struct time_context *)((uint32_t)ctx + 0x8);
-	update_time_delta(tctx);
+	struct game_context *gctx = fetch_game_context();
+	if(gctx->fps_limiter_toggle){
+		delay_and_update_time_delta(tctx, *(double *)0x013d33a0);
+	}else{
+		update_time_delta(tctx);
+	}
 	int time_delta = round(tctx->delta_t);
 
 	{
-		LOG_VERBOSE("1");
 		register void *ecx asm("ecx");
+		LOG_VERBOSE("1");
 		void (*fun_00872730)(int) = (void (*)(int))0x00872730;
 		ecx = (void *)((uint32_t)ctx + 0x28);
 		fun_00872730(time_delta);
@@ -83,16 +96,16 @@ void game_tick_replica(void *ctx){
 
 	uint32_t *dat_01642edc = (uint32_t *)0x01642edc;
 	if(*dat_01642edc != 0){
-		LOG_VERBOSE("2");
 		register void *ecx asm("ecx");
+		LOG_VERBOSE("2");
 		void (*fun_009ea0a0)(int) = (void (*)(int))0x009ea0a0;
 		ecx = (void *)*dat_01642edc;
 		fun_009ea0a0(time_delta);
 	}
 
 	{
-		LOG_VERBOSE("3");
 		register void *ecx asm("ecx");
+		LOG_VERBOSE("3");
 		void (*fun_009e9020)(int) = (void (*)(int))0x009e9020;
 		uint32_t *dat_01642ed8 = (uint32_t *)0x01642ed8;
 		ecx = (void *)*dat_01642ed8;
@@ -100,8 +113,8 @@ void game_tick_replica(void *ctx){
 	}
 
 	{
-		LOG_VERBOSE("4");
 		register void *ecx asm("ecx");
+		LOG_VERBOSE("4");
 		void (*fun)(void) = (void (*)(void)) *(uint32_t **)(*(uint32_t *)ctx + 0x38);
 		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
 		ecx = (void *)ctx;
@@ -109,8 +122,8 @@ void game_tick_replica(void *ctx){
 	}
 
 	{
-		LOG_VERBOSE("5");
 		register void *ecx asm("ecx");
+		LOG_VERBOSE("5");
 		void (*fun_00de8cd0)(int) = (void (*)(int))0x00de8cd0;
 		uint32_t *dat_01664a80 = (uint32_t *)0x01664a80;
 		ecx = (void *)*dat_01664a80;
@@ -118,8 +131,8 @@ void game_tick_replica(void *ctx){
 	}
 
 	{
-		LOG_VERBOSE("6");
 		register void *ecx asm("ecx");
+		LOG_VERBOSE("6");
 		void *unknown_context = fetch_016ed578();
 		void (*fun)(void) = (void (*)(void)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x4c);
 		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
@@ -128,31 +141,38 @@ void game_tick_replica(void *ctx){
 	}
 
 	{
-		LOG_VERBOSE("7");
 		register void *ecx asm("ecx");
+		LOG_VERBOSE("7");
 		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t*)0x01642dfc + 0x10c);
 		void (*fun)(void) = (void (*)(void)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x34);
-		void (*fun_1)(void) = (void (*)(void)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x44);
 		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		LOG_VERBOSE("fun_1 is at 0x%08x", (void *)fun_1);
-
-		void *unknown_context_2 = (void *)*(uint32_t *)(*(uint32_t*)0x01642dfc + 0x198);
-		void (*fun_2)(int) = (void (*)(int)) *(uint32_t **)(*(uint32_t*)unknown_context_2 + 0x24);
-		LOG_VERBOSE("fun_2 is at 0x%08x", (void *)fun_2);
-
 		ecx = unknown_context;
 		fun();
-
-		ecx = unknown_context;
-		fun_1();
-
-		ecx = unknown_context_2;
-		fun_2(time_delta);
 	}
 
 	{
-		LOG_VERBOSE("8");
 		register void *ecx asm("ecx");
+		LOG_VERBOSE("8");
+		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t*)0x01642dfc + 0x10c);
+		void (*fun)(void) = (void (*)(void)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x44);
+		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
+		ecx = unknown_context;
+		fun();
+	}
+
+	{
+		register void *ecx asm("ecx");
+		LOG_VERBOSE("9");
+		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t*)0x01642dfc + 0x198);
+		void (*fun)(int) = (void (*)(int)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x24);
+		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
+		ecx = unknown_context;
+		fun(time_delta);
+	}
+
+	{
+		register void *ecx asm("ecx");
+		LOG_VERBOSE("10");
 		void *unknown_context = (void *) (*(uint32_t *)0x01643190 + 0x4);
 		void (*fun)(int) = (void (*)(int)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x24);
 		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
@@ -161,8 +181,8 @@ void game_tick_replica(void *ctx){
 	}
 
 	{
-		LOG_VERBOSE("9");
-		register uint32_t *ecx asm("ecx");
+		register void *ecx asm("ecx");
+		LOG_VERBOSE("11");
 		double unknown_double = (time_delta % 4000) + *(double *)0x013a89b0;
 		uint32_t unknown_local_context[2];
 		void (*fun_0100a940)(float, uint32_t) = (void (*)(float, uint32_t)) 0x0100a940;
@@ -173,8 +193,8 @@ void game_tick_replica(void *ctx){
 	}
 
 	{
-		LOG_VERBOSE("10");
 		register void *ecx asm("ecx");
+		LOG_VERBOSE("10");
 		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t *)0x01642dfc + 0x1bc);
 		void (*fun_006ea880)(int) = (void (*)(int)) 0x006ea880;
 		ecx = unknown_context;
