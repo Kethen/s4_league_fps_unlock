@@ -25,6 +25,12 @@ FILE *log_file = NULL;
 	} \
 }
 
+void patch_min_frametime(double min_frametime){
+	LOG("patching minimal frametime to %f", min_frametime);
+	double *min_frametime_const = (void *)0x013d33a0;
+	*min_frametime_const = min_frametime;
+}
+
 void *main_thread(void *arg){
 }
 
@@ -33,9 +39,7 @@ int init(){
 	log_file = fopen("s4_league_fps_unlock.log", "w");
 	LOG("mhmm library loaded");
 
-	LOG("patching");
-	double *frametime = (void *)0x013d33a0;
-	*frametime = 8.0;
+	patch_min_frametime(8.0);
 
 	LOG("now starting main thread");
 	pthread_t thread;
