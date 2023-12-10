@@ -10,7 +10,7 @@
 // mingw don't provide a mprotect wrap
 #include <memoryapi.h>
 
-#define ENABLE_LOGGING 0
+#define ENABLE_LOGGING 1
 
 #if ENABLE_LOGGING
 FILE *log_file = NULL;
@@ -35,6 +35,7 @@ pthread_mutex_t log_mutex;
 	} \
 	pthread_mutex_unlock(&log_mutex); \
 }
+
 #else // ENABLE_LOGGING
 #define LOG(...)
 #endif //ENABLE_LOGGING
@@ -45,6 +46,22 @@ pthread_mutex_t log_mutex;
 #else // VERBOSE
 	#define LOG_VERBOSE(...)
 #endif //VERBOSE
+
+// __sync_synchronize() is not enough..?
+#define INIT_MEM_FENCE() \
+static bool _mem_fence_ready = 0; \
+static pthread_mutex_t _mem_fence; \
+if(!_mem_fence_ready){ \
+	if(pthread_mutex_init(&_mem_fence, NULL)){ \
+		LOG("failed to initialize mem fence for %s", __FUNCTION__); \
+		exit(1); \
+	} \
+	_mem_fence_ready = true; \
+}
+
+#define MEM_FENCE() \
+pthread_mutex_lock(&_mem_fence); \
+pthread_mutex_unlock(&_mem_fence);
 
 struct __attribute__ ((packed)) time_context{
 	double unknown;
@@ -66,7 +83,80 @@ struct __attribute__ ((packed)) game_context{
 static struct game_context *(*fetch_game_context)(void) = (struct game_context *(*)(void)) 0x004ad790;
 static void (__attribute__((thiscall)) *update_time_delta)(struct time_context *ctx) = (void (__attribute__((thiscall)) *)(struct time_context *ctx)) 0x00ff7f30;
 
-static void *(*fetch_016ed578)(void) = (void* (*)(void)) 0x01172b00;
+struct __attribute__ ((packed)) fun_007b0180_ctx{
+	// float 0x684 x, 0x688 y, 0x68c z
+	uint8_t unknown[0x684];
+	float x;
+	float y;
+	float z;
+};
+
+static void (__attribute__((thiscall)) *orig_fun_007b0180)(void*, float, float, float, uint32_t);
+static void __attribute__((thiscall)) patched_fun_007b0180(struct fun_007b0180_ctx *ctx, float param_1, float param_2, float param_3, uint32_t param_4){
+	INIT_MEM_FENCE()
+	float before_x = ctx->x;
+	float before_y = ctx->y;
+	float before_z = ctx->z;
+
+	MEM_FENCE();
+
+	orig_fun_007b0180(ctx, param_1, param_2, param_3, param_4);
+
+	MEM_FENCE();
+
+	float after_x = ctx->x;
+	float after_y = ctx->y;
+	float after_z = ctx->z;
+
+	float delta_x = after_x - before_x;
+	float delta_y = after_y - before_y;
+	float delta_z = after_z - before_z;
+
+	bool log = false;
+	if(abs(delta_x) < 1 && abs(delta_z) < 1 && abs(delta_y) >=1){
+		log = true;
+	}else if((abs(delta_x) >= 1 || abs(delta_z) >= 1) && abs(delta_y) < 1){
+		log = true;
+	}
+
+	void * ret_addr = __builtin_return_address(0);
+
+	if(log){
+		LOG("%s: ctx 0x%08x, param_1 %f, param_2 %f, param_3 %f, param_4 %u", __FUNCTION__, ctx, param_1, param_2, param_3, param_4);
+		LOG("%s: %f->%f %f->%f %f->%f", __FUNCTION__, before_x, after_x, before_y, after_y, before_z, after_z);
+		LOG("%s: %f %f %f", __FUNCTION__, after_x - before_x, after_y - before_y, after_z - before_z);
+		LOG("%s: return addr: 0x%08x", __FUNCTION__, ret_addr);
+	}
+}
+
+static void hook_fun_007b0180(){
+	LOG("let's see what 0x007b0180 does");
+
+	uint8_t intended_trampoline[] = {
+		// space for original instruction
+		0, 0, 0, 0, 0, 0, 0, 0, 0,
+		// MOV eax,0x007b0189
+		0xb8, 0x89, 0x01, 0x7b, 0x00,
+		// JMP eax
+		0xff, 0xe0
+	};
+	memcpy((void *)intended_trampoline, (void *)0x007b0180, 9);
+
+	uint8_t intended_patch[] = {
+		// MOV eax, patched_fun_007b0180
+		0xb8, 0, 0, 0, 0,
+		// JMP eax
+		0xff, 0xe0
+	};
+	*(uint32_t *)&intended_patch[1] = (uint32_t)patched_fun_007b0180;
+
+	orig_fun_007b0180 = (void (__attribute__((thiscall)) *)(void*, float, float, float, uint32_t))VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	memcpy((void *)orig_fun_007b0180, intended_trampoline, sizeof(intended_trampoline));
+	DWORD old_protect;
+	VirtualProtect((void *)orig_fun_007b0180, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
+
+	memcpy((void *)0x007b0180, intended_patch, sizeof(intended_patch));
+}
 
 // function at 00871970, not essentially game tick
 static void (__attribute__((thiscall)) *orig_game_tick)(void *);
@@ -128,6 +218,12 @@ static void patch_min_frametime(double min_frametime){
 	*min_frametime_const = min_frametime;
 }
 
+static void experinmental_static_patches(){
+	LOG("applying experimental patches");
+	float *what_is_this = (float *)0x014786d8;
+	*what_is_this = 0.0001;
+}
+
 static void *main_thread(void *arg){
 	return NULL;
 }
@@ -145,6 +241,9 @@ int init(){
 	LOG("mhmm library loaded");
 
 	hook_game_tick();
+	hook_fun_007b0180();
+
+	experinmental_static_patches();
 
 	LOG("now starting main thread");
 	pthread_t thread;
