@@ -81,6 +81,13 @@ static void (__attribute__((thiscall))  *delay_and_update_time_delta)(struct tim
 
 static void *(*fetch_016ed578)(void) = (void* (*)(void)) 0x01172b00;
 
+/*
+/* for reference, this funtion mostly delay/evaluate time delta then update the value for a few objects,
+ * the meat and potato do not seem to be here
+ *
+ * the implementation also seem unstable without a bunch of weird memory fences, and would not work in -O2
+ */
+
 void __attribute__((thiscall)) game_tick_replica(void *ctx){
 	LOG_VERBOSE("ctx is at 0x%08x", ctx);
 
@@ -203,6 +210,7 @@ void __attribute__((thiscall)) game_tick_replica(void *ctx){
 	}
 }
 
+//static float speed_dampener;
 
 // function at 00871970, not essentially game tick
 static void (__attribute__((thiscall)) *orig_game_tick)(void *);
@@ -210,13 +218,22 @@ static void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 	LOG_VERBOSE("game tick function hook fired");
 	INIT_MEM_FENCE();
 
+	const static float orig_speed_dampener = 0.015;
+	const static double orig_fixed_frametime = 1.66666666666666678509045596002E1;
+	static float *speed_dampener = (float *)0x015f4210;
+
+	static struct time_context tctx;
+
 	struct game_context *ctx = fetch_game_context();
 	LOG_VERBOSE("game context at 0x%08x", (uint32_t)ctx);
-	ctx->online_verbose_toggle = 1;
 	ctx->fps_limiter_toggle = 0;
-	MEM_FENCE();
-	//orig_game_tick(tick_ctx);
-	game_tick_replica(tick_ctx);
+	//MEM_FENCE();
+	//game_tick_replica(tick_ctx);
+	orig_game_tick(tick_ctx);
+
+	update_time_delta(&tctx);
+	*speed_dampener = tctx.delta_t * orig_speed_dampener / orig_fixed_frametime;
+	LOG_VERBOSE("delta_t: %f, speed_dampener: %f", tctx.delta_t, *speed_dampener);
 }
 static void hook_game_tick(){
 	LOG("hooking game tick");
@@ -258,6 +275,16 @@ static void patch_min_frametime(double min_frametime){
 	*min_frametime_const = min_frametime;
 }
 
+/*
+static void redirect_speed_dampener(){
+	LOG("redirecting speed dampener to 0x%08x", &speed_dampener);
+	uint32_t *patch_here = (uint32_t *)0x007b2363;
+	*patch_here = (uint32_t)&speed_dampener;
+	patch_here = (uint32_t *)0x007b0643;
+	*patch_here = (uint32_t)&speed_dampener;
+}
+*/
+
 static void *main_thread(void *arg){
 	return NULL;
 }
@@ -271,7 +298,8 @@ int init(){
 	}
 	LOG("mhmm library loaded");
 
-	patch_min_frametime(8.0);
+	//patch_min_frametime(8.0);
+	//redirect_speed_dampener();
 	hook_game_tick();
 
 	LOG("now starting main thread");
