@@ -10,9 +10,13 @@
 // mingw don't provide a mprotect wrap
 #include <memoryapi.h>
 
+#define ENABLE_LOGGING 0
+
+#if ENABLE_LOGGING
 FILE *log_file = NULL;
 char log_buf[500];
 pthread_mutex_t log_mutex;
+
 #define LOG(...) \
 { \
 	pthread_mutex_lock(&log_mutex); \
@@ -31,6 +35,9 @@ pthread_mutex_t log_mutex;
 	} \
 	pthread_mutex_unlock(&log_mutex); \
 }
+#else // ENABLE_LOGGING
+#define LOG(...)
+#endif //ENABLE_LOGGING
 
 #define VERBOSE 0
 #if VERBOSE
@@ -38,23 +45,6 @@ pthread_mutex_t log_mutex;
 #else // VERBOSE
 	#define LOG_VERBOSE(...)
 #endif //VERBOSE
-
-// __sync_synchronize() is not enough..?
-
-#define INIT_MEM_FENCE() \
-static bool _mem_fence_ready = 0; \
-static pthread_mutex_t _mem_fence; \
-if(!_mem_fence_ready){ \
-	if(pthread_mutex_init(&_mem_fence, NULL)){ \
-		LOG("failed to initialize mem fence for %s", __FUNCTION__); \
-		exit(1); \
-	} \
-	_mem_fence_ready = true; \
-}
-
-#define MEM_FENCE() \
-pthread_mutex_lock(&_mem_fence); \
-pthread_mutex_unlock(&_mem_fence);
 
 struct __attribute__ ((packed)) time_context{
 	double unknown;
@@ -76,147 +66,12 @@ struct __attribute__ ((packed)) game_context{
 static struct game_context *(*fetch_game_context)(void) = (struct game_context *(*)(void)) 0x004ad790;
 static void (__attribute__((thiscall)) *update_time_delta)(struct time_context *ctx) = (void (__attribute__((thiscall)) *)(struct time_context *ctx)) 0x00ff7f30;
 
-static void (__attribute__((thiscall))  *delay_and_update_time_delta)(struct time_context *, double) = (void (__attribute__((thiscall)) *)(struct time_context *, double)) 0x00ff7fd0;
-
-
 static void *(*fetch_016ed578)(void) = (void* (*)(void)) 0x01172b00;
-
-/*
-/* for reference, this funtion mostly delay/evaluate time delta then update the value for a few objects,
- * the meat and potato do not seem to be here
- *
- * the implementation also seem unstable without a bunch of weird memory fences, and would not work in -O2
- */
-
-void __attribute__((thiscall)) game_tick_replica(void *ctx){
-	LOG_VERBOSE("ctx is at 0x%08x", ctx);
-
-	INIT_MEM_FENCE();
-
-	struct time_context *tctx = (struct time_context *)((uint32_t)ctx + 0x8);
-	struct game_context *gctx = fetch_game_context();
-	if(gctx->fps_limiter_toggle){
-		delay_and_update_time_delta(tctx, *(double *)0x013d33a0);
-	}else{
-		update_time_delta(tctx);
-	}
-	int time_delta = round(tctx->delta_t);
-
-	{
-		LOG_VERBOSE("1");
-		void (__attribute__((thiscall)) *fun_00872730)(void *, int) = (void (__attribute__((thiscall)) *)(void *, int))0x00872730;
-		void *unknown_context = (void *)((uint32_t)ctx + 0x28);
-		MEM_FENCE();
-		fun_00872730(unknown_context, time_delta);
-	}
-
-	uint32_t *dat_01642edc = (uint32_t *)0x01642edc;
-	if(*dat_01642edc != 0){
-		LOG_VERBOSE("2");
-		void (__attribute__((thiscall)) *fun_009ea0a0)(void *, int) = (void (__attribute__((thiscall))*)(void *, int))0x009ea0a0;
-		void *unknown_context = (void *)*dat_01642edc;
-		MEM_FENCE();
-		fun_009ea0a0(unknown_context, time_delta);
-	}
-
-	{
-		LOG_VERBOSE("3");
-		void (__attribute__((thiscall)) *fun_009e9020)(void *, int) = (void (__attribute__((thiscall)) *)(void *, int))0x009e9020;
-		uint32_t *dat_01642ed8 = (uint32_t *)0x01642ed8;
-		void *unknown_context = (void *)*dat_01642ed8;
-		MEM_FENCE();
-		fun_009e9020(unknown_context, time_delta);
-	}
-
-	{
-		LOG_VERBOSE("4");
-		void (__attribute__((thiscall)) *fun)(void *) = (void (__attribute__((thiscall)) *)(void *)) *(uint32_t **)(*(uint32_t *)ctx + 0x38);
-		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		MEM_FENCE();
-		fun((void *)ctx);
-	}
-
-	{
-		LOG_VERBOSE("5");
-		void (__attribute__((thiscall)) *fun_00de8cd0)(void *, int) = (void (__attribute__((thiscall)) *)(void*, int))0x00de8cd0;
-		uint32_t *dat_01664a80 = (uint32_t *)0x01664a80;
-		void *unknown_context = (void *)*dat_01664a80;
-		MEM_FENCE();
-		fun_00de8cd0(unknown_context, time_delta);
-	}
-
-	{
-		LOG_VERBOSE("6");
-		void *unknown_context = fetch_016ed578();
-		void (__attribute__((thiscall)) *fun)(void *) = (void (__attribute__((thiscall)) *)(void *)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x4c);
-		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		MEM_FENCE();
-		fun(unknown_context);
-	}
-
-	{
-		LOG_VERBOSE("7");
-		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t*)0x01642dfc + 0x10c);
-		void (__attribute__((thiscall)) *fun)(void *) = (void (__attribute__((thiscall)) *)(void *)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x34);
-		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		MEM_FENCE();
-		fun(unknown_context);
-	}
-
-	{
-		LOG_VERBOSE("8");
-		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t*)0x01642dfc + 0x10c);
-		void (__attribute__((thiscall)) *fun)(void *) = (void (__attribute__((thiscall)) *)(void *)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x44);
-		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		MEM_FENCE();
-		fun(unknown_context);
-	}
-
-	{
-		LOG_VERBOSE("9");
-		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t*)0x01642dfc + 0x198);
-		void (__attribute__((thiscall)) *fun)(void *, int) = (void (__attribute__((thiscall)) *)(void *, int)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x24);
-		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		MEM_FENCE();
-		fun(unknown_context, time_delta);
-	}
-
-	{
-		LOG_VERBOSE("10");
-		void *unknown_context = (void *) (*(uint32_t *)0x01643190 + 0x4);
-		void (__attribute__((thiscall)) *fun)(void*, int) = (void (__attribute__((thiscall)) *)(void *, int)) *(uint32_t **)(*(uint32_t*)unknown_context + 0x24);
-		LOG_VERBOSE("fun is at 0x%08x", (void *)fun);
-		MEM_FENCE();
-		fun(unknown_context, time_delta);
-	}
-
-	{
-		LOG_VERBOSE("11");
-		double unknown_double = (time_delta % 4000) + *(double *)0x013a89b0;
-		uint32_t unknown_local_context[2];
-		void (__attribute__((thiscall)) *fun_0100a940)(uint32_t *, float, uint32_t) = (void (__attribute__((thiscall)) *)(uint32_t *, float, uint32_t)) 0x0100a940;
-		MEM_FENCE();
-		fun_0100a940(unknown_local_context, unknown_double / *(float *)0x013ab2a0, *(uint32_t*)0x014c904c);
-		*(uint32_t*)0x016eff30 = *unknown_local_context;
-		*(uint32_t*)0x016eff34 = unknown_local_context[1];
-	}
-
-	{
-		LOG_VERBOSE("12");
-		void *unknown_context = (void *)*(uint32_t *)(*(uint32_t *)0x01642dfc + 0x1bc);
-		void (__attribute__((thiscall)) *fun_006ea880)(void *, int) = (void (__attribute__((thiscall)) *)(void *, int)) 0x006ea880;
-		MEM_FENCE();
-		fun_006ea880(unknown_context, time_delta);
-	}
-}
-
-//static float speed_dampener;
 
 // function at 00871970, not essentially game tick
 static void (__attribute__((thiscall)) *orig_game_tick)(void *);
 static void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 	LOG_VERBOSE("game tick function hook fired");
-	INIT_MEM_FENCE();
 
 	const static float orig_speed_dampener = 0.015;
 	const static double orig_fixed_frametime = 1.66666666666666678509045596002E1;
@@ -227,8 +82,6 @@ static void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 	struct game_context *ctx = fetch_game_context();
 	LOG_VERBOSE("game context at 0x%08x", (uint32_t)ctx);
 	ctx->fps_limiter_toggle = 0;
-	//MEM_FENCE();
-	//game_tick_replica(tick_ctx);
 	orig_game_tick(tick_ctx);
 
 	update_time_delta(&tctx);
@@ -275,31 +128,22 @@ static void patch_min_frametime(double min_frametime){
 	*min_frametime_const = min_frametime;
 }
 
-/*
-static void redirect_speed_dampener(){
-	LOG("redirecting speed dampener to 0x%08x", &speed_dampener);
-	uint32_t *patch_here = (uint32_t *)0x007b2363;
-	*patch_here = (uint32_t)&speed_dampener;
-	patch_here = (uint32_t *)0x007b0643;
-	*patch_here = (uint32_t)&speed_dampener;
-}
-*/
-
 static void *main_thread(void *arg){
 	return NULL;
 }
 
 __attribute__((constructor))
 int init(){
+	#if ENABLE_LOGGING
 	log_file = fopen("s4_league_fps_unlock.log", "w");
 	if(pthread_mutex_init(&log_mutex, NULL)){
 		printf("logger mutex init failed\n");
 		return 0;
 	}
+	#endif // ENABLE_LOGGING
+
 	LOG("mhmm library loaded");
 
-	//patch_min_frametime(8.0);
-	//redirect_speed_dampener();
 	hook_game_tick();
 
 	LOG("now starting main thread");
