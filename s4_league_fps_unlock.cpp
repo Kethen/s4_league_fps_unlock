@@ -10,7 +10,7 @@
 // mingw don't provide a mprotect wrap
 #include <memoryapi.h>
 
-#define ENABLE_LOGGING 1
+#define ENABLE_LOGGING 0
 
 #if ENABLE_LOGGING
 FILE *log_file = NULL;
@@ -63,6 +63,8 @@ if(!_mem_fence_ready){ \
 pthread_mutex_lock(&_mem_fence); \
 pthread_mutex_unlock(&_mem_fence);
 
+uint32_t frametime;
+
 struct __attribute__ ((packed)) time_context{
 	double unknown;
 	double last_t;
@@ -83,6 +85,92 @@ struct __attribute__ ((packed)) game_context{
 static struct game_context *(*fetch_game_context)(void) = (struct game_context *(*)(void)) 0x004ad790;
 static void (__attribute__((thiscall)) *update_time_delta)(struct time_context *ctx) = (void (__attribute__((thiscall)) *)(struct time_context *ctx)) 0x00ff7f30;
 
+// contains actor state
+struct ctx_01642f30{
+	uint8_t unknown[0xb0];
+	uint8_t actor_state;
+};
+static struct ctx_01642f30 *(*fetch_ctx_01642f30)(void) = (struct ctx_01642f30 *(*)(void)) 0x004ae0a0;
+
+// it seems that all intended movement delta goes here
+struct __attribute__ ((packed)) move_actor_by_ctx{
+	// float 0x118 + 0x684 holds a fun_007b0180_ctx
+	uint8_t unknown[0x118 + 0x684];
+	float x;
+	float y;
+	float z;
+};
+static void (__attribute__((thiscall)) *orig_move_actor_by)(void*, float, float, float);
+static void __attribute((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *ctx, float param_1, float param_2, float param_3){
+	const double orig_fixed_frametime = 1.66666666666666678509045596002E1;
+
+	struct ctx_01642f30* actx = fetch_ctx_01642f30();
+
+	LOG_VERBOSE("%s: ctx 0x%08x, param_1 %f, param_2 %f, param_3 %f", __FUNCTION__, ctx, param_1, param_2, param_3);
+	LOG_VERBOSE("%s: called from 0x%08x -> 0x%08x -> 0x%08x", __FUNCTION__, __builtin_return_address(2), __builtin_return_address(1), __builtin_return_address(0));
+	LOG_VERBOSE("%s: actx->actor_state %u", __FUNCTION__, actx->actor_state);
+
+	// various fixes
+	void *ret_addr = __builtin_return_address(0);
+
+	float y = param_2;
+	if(ret_addr == (void*)0x00527467){
+		if(actx->actor_state == 31 && param_2 > 0.0001){
+			LOG_VERBOSE("%s: applying fly speed fix", __FUNCTION__);
+			y = 19.5 * frametime / orig_fixed_frametime;
+		}
+
+		if(actx->actor_state == 63){
+			static uint32_t scythe_time = 0;
+			static float last_y = 0;
+			float upper_cut_up_speed = 401 * frametime / orig_fixed_frametime;
+			if(last_y < 0 && param_2 > 0){
+				scythe_time = 0;
+				y = upper_cut_up_speed;
+			}else{
+				scythe_time += frametime;
+				if(scythe_time < orig_fixed_frametime * 4){
+					y = upper_cut_up_speed * (orig_fixed_frametime * 4 - scythe_time) / (orig_fixed_frametime * 4);
+				}
+			}
+			LOG_VERBOSE("%s: applying scythe uppercut speed fix, y %f, scythe_time %u", __FUNCTION__, y, scythe_time);
+			last_y = param_2;
+		}
+	}
+
+	orig_move_actor_by(ctx, param_1, y, param_3);
+}
+
+static void hook_move_actor_by(){
+	LOG("hooking move_actor_by");
+
+	uint8_t intended_trampoline[] = {
+		// space for original instruction
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		// MOV eax,0x0051c2fa
+		0xb8, 0xfa, 0xc2, 0x51, 0x00,
+		// JMP eax
+		0xff, 0xe0
+	};
+	memcpy((void *)intended_trampoline, (void *)0x0051c2f0, 10);
+
+	uint8_t intended_patch[] = {
+		// MOV eax, patched_fun_0051c2fa
+		0xb8, 0, 0, 0, 0,
+		// JMP eax
+		0xff, 0xe0
+	};
+	*(uint32_t *)&intended_patch[1] = (uint32_t)patched_move_actor_by;
+
+	orig_move_actor_by = (void (__attribute__((thiscall)) *)(void*, float, float, float))VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	memcpy((void *)orig_move_actor_by, intended_trampoline, sizeof(intended_trampoline));
+	DWORD old_protect;
+	VirtualProtect((void *)orig_move_actor_by, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
+
+	memcpy((void *)0x0051c2f0, intended_patch, sizeof(intended_patch));
+}
+
+// it seems that every intended coord change goes here, then it gets processed before applied
 struct __attribute__ ((packed)) fun_007b0180_ctx{
 	// float 0x684 x, 0x688 y, 0x68c z
 	uint8_t unknown[0x684];
@@ -90,7 +178,6 @@ struct __attribute__ ((packed)) fun_007b0180_ctx{
 	float y;
 	float z;
 };
-
 static void (__attribute__((thiscall)) *orig_fun_007b0180)(void*, float, float, float, uint32_t);
 static void __attribute__((thiscall)) patched_fun_007b0180(struct fun_007b0180_ctx *ctx, float param_1, float param_2, float param_3, uint32_t param_4){
 	INIT_MEM_FENCE()
@@ -113,9 +200,9 @@ static void __attribute__((thiscall)) patched_fun_007b0180(struct fun_007b0180_c
 	float delta_z = after_z - before_z;
 
 	bool log = false;
-	if(abs(delta_x) < 1 && abs(delta_z) < 1 && abs(delta_y) >=1){
+	if(std::abs(delta_x) < 1 && std::abs(delta_z) < 1 && std::abs(delta_y) >=1){
 		log = true;
-	}else if((abs(delta_x) >= 1 || abs(delta_z) >= 1) && abs(delta_y) < 1){
+	}else if((std::abs(delta_x) >= 1 || std::abs(delta_z) >= 1) && std::abs(delta_y) < 1){
 		log = true;
 	}
 
@@ -176,6 +263,8 @@ static void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 
 	update_time_delta(&tctx);
 	*speed_dampener = tctx.delta_t * orig_speed_dampener / orig_fixed_frametime;
+	frametime = round(tctx.delta_t);
+
 	LOG_VERBOSE("delta_t: %f, speed_dampener: %f", tctx.delta_t, *speed_dampener);
 }
 static void hook_game_tick(){
@@ -241,7 +330,8 @@ int init(){
 	LOG("mhmm library loaded");
 
 	hook_game_tick();
-	hook_fun_007b0180();
+	//hook_fun_007b0180();
+	hook_move_actor_by();
 
 	experinmental_static_patches();
 
