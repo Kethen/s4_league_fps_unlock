@@ -313,8 +313,6 @@ static void patch_min_frametime(double min_frametime){
 
 static void experinmental_static_patches(){
 	LOG("applying experimental patches");
-	float *what_is_this = (float *)0x014786d8;
-	*what_is_this = 0.0001;
 }
 
 static void *main_thread(void *arg){
