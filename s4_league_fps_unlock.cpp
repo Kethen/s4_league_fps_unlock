@@ -158,7 +158,9 @@ static void hook_move_actor_by(){
 		// MOV eax, patched_fun_0051c2fa
 		0xb8, 0, 0, 0, 0,
 		// JMP eax
-		0xff, 0xe0
+		0xff, 0xe0,
+		// nop nop nop
+		0x90, 0x90, 0x90
 	};
 	*(uint32_t *)&intended_patch[1] = (uint32_t)patched_move_actor_by;
 
@@ -233,7 +235,9 @@ static void hook_fun_007b0180(){
 		// MOV eax, patched_fun_007b0180
 		0xb8, 0, 0, 0, 0,
 		// JMP eax
-		0xff, 0xe0
+		0xff, 0xe0,
+		// nop nop
+		0x90, 0x90
 	};
 	*(uint32_t *)&intended_patch[1] = (uint32_t)patched_fun_007b0180;
 
