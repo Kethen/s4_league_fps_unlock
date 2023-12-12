@@ -93,7 +93,7 @@ struct ctx_01642f30{
 };
 static struct ctx_01642f30 *(*fetch_ctx_01642f30)(void) = (struct ctx_01642f30 *(*)(void)) 0x004ae0a0;
 
-// it seems that weapon switch goes here
+// it seems that weapon slot switch of all actors goes here
 struct __attribute__((packed)) switch_weapon_slot_ctx{
 	uint8_t unknown[0x24];
 	uint8_t weapon_slot;
@@ -167,31 +167,46 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 	if(ret_addr == (void*)0x00527467){
 		// fly
 		if(actx->actor_state == 31 && param_2 > 0.0001){
-			LOG_VERBOSE("%s: applying fly speed fix", __FUNCTION__);
+			// simulated, should not be a lua value
 			y = 19.5 * frametime / orig_fixed_frametime;
+			LOG_VERBOSE("%s: applying fly speed fix, y %f, y/param_2 %f", __FUNCTION__, y, y / param_2);
+			// y/param_2 is roughly orig frametime/frametime, without accounting for the unnoticible at 60 gradual change
 		}
 
 		// scythe uppercut
 		if(actx->actor_state == 63){
 			static uint32_t scythe_time = 0;
 			static float last_y = 0;
-			float upper_cut_up_speed = 401 * frametime / orig_fixed_frametime;
+			// simulated lua value on the max client, for reference
+			//float upper_cut_up_speed = 401 * frametime / orig_fixed_frametime;
 			if(last_y < 0 && param_2 > 0){
 				scythe_time = 0;
-				y = upper_cut_up_speed;
+				//y = upper_cut_up_speed;
 			}else{
 				scythe_time += frametime;
 				if(scythe_time < orig_fixed_frametime * 4){
-					y = upper_cut_up_speed * (orig_fixed_frametime * 4 - scythe_time) / (orig_fixed_frametime * 4);
+					//y = upper_cut_up_speed * (orig_fixed_frametime * 4 - scythe_time) / (orig_fixed_frametime * 4);
 				}
 			}
-			LOG_VERBOSE("%s: applying scythe uppercut speed fix, y %f, scythe_time %u", __FUNCTION__, y, scythe_time);
+			// approx, would allow different servers with different lua values to work
+			if(scythe_time < orig_fixed_frametime * 4){
+				y = param_2 * (1.0 - 0.15 * std::abs(16.0 - frametime) / 6.0);
+			}
+			LOG_VERBOSE("%s: applying scythe uppercut speed fix, y %f, y/param_2 %f, scythe_time %u", __FUNCTION__, y, y / param_2, scythe_time);
+			// they seems to have almost gotten this one right, y/param_2 is around 0.85 at 5ms, on the simulated algorithm
 			last_y = param_2;
 		}
 
 		// jump attacks
 		if(actx->actor_state == 45){
+			// only PS seems to be broken at the moment
+			// how to identify a PS?
 			//y = (-825.0) * frametime / orig_fixed_frametime;
+			/*
+			float modifier = orig_fixed_frametime / frametime;
+			y = param_2 * modifier;
+			LOG("%s: applying weapon drop fix, y %f, modifier %f", __FUNCTION__, y, modifier);
+			*/
 		}
 	}
 
@@ -393,8 +408,8 @@ int init(){
 
 	hook_game_tick();
 	//hook_move_actor_exact();
-	//hook_move_actor_by();
-	hook_switch_weapon_slot();
+	hook_move_actor_by();
+	//hook_switch_weapon_slot();
 
 	experinmental_static_patches();
 
