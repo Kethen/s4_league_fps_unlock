@@ -10,7 +10,7 @@
 // mingw don't provide a mprotect wrap
 #include <memoryapi.h>
 
-#define ENABLE_LOGGING 1
+#define ENABLE_LOGGING 0
 
 #if ENABLE_LOGGING
 FILE *log_file = NULL;
@@ -65,6 +65,7 @@ pthread_mutex_unlock(&_mem_fence);
 
 uint32_t frametime;
 uint8_t weapon_slot;
+float set_drop_val;
 
 struct __attribute__ ((packed)) time_context{
 	double unknown;
@@ -92,6 +93,52 @@ struct ctx_01642f30{
 	uint8_t actor_state;
 };
 static struct ctx_01642f30 *(*fetch_ctx_01642f30)(void) = (struct ctx_01642f30 *(*)(void)) 0x004ae0a0;
+
+// this is a looong function with a lot of branches, but it seems to use the SetDrop value during a jump attack
+struct ctx_fun_005e4020{
+	uint8_t unknown[0x2cc + 0x4];
+	float set_drop_val;
+};
+static void (__attribute__((thiscall)) *orig_fun_005e4020)(void *, uint32_t);
+void __attribute__((thiscall)) patched_fun_005e4020(struct ctx_fun_005e4020 *ctx, uint32_t param_1){
+	orig_fun_005e4020(ctx, param_1);
+	if((void *)0x0051f508 == __builtin_return_address(1)){
+		set_drop_val = ctx->set_drop_val;
+		LOG_VERBOSE("%s: updating player set_drop_val to %f", __FUNCTION__, set_drop_val);
+	}
+	LOG_VERBOSE("%s: ctx 0x%08x, param_1 %u, set_drop_val %f, 0x%08x -> 0x%08x -> 0x%08x", __FUNCTION__, ctx, param_1, ctx->set_drop_val, __builtin_return_address(2), __builtin_return_address(1), __builtin_return_address(0));
+}
+
+static void hook_fun_005e4020(){
+	LOG("hooking fun_005e4020");
+
+	uint8_t intended_trampoline[] = {
+		// space for original instruction
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		// MOV eax,0x005e402a
+		0xb8, 0x2a, 0x40, 0x5e, 0x00,
+		// JMP eax
+		0xff, 0xe0
+	};
+	memcpy((void *)intended_trampoline, (void *)0x005e4020, 10);
+
+	uint8_t intended_patch[] = {
+		// MOV eax, patched_fun_005e4020
+		0xb8, 0, 0, 0, 0,
+		// JMP eax
+		0xff, 0xe0,
+		// nop nop nop
+		0x90, 0x90, 0x90
+	};
+	*(uint32_t *)&intended_patch[1] = (uint32_t)patched_fun_005e4020;
+
+	orig_fun_005e4020 = (void (__attribute__((thiscall)) *)(void*, uint32_t))VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	memcpy((void *)orig_fun_005e4020, intended_trampoline, sizeof(intended_trampoline));
+	DWORD old_protect;
+	VirtualProtect((void *)orig_fun_005e4020, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
+
+	memcpy((void *)0x005e4020, intended_patch, sizeof(intended_patch));
+}
 
 // it seems that weapon slot switch of all actors goes here
 struct __attribute__((packed)) switch_weapon_slot_ctx{
@@ -175,51 +222,45 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 
 		// scythe uppercut
 		if(actx->actor_state == 63){
-			static uint32_t scythe_time = 0;
-			static float last_y = 0;
-			// simulated lua value on the max client, for reference
-			//float upper_cut_up_speed = 401 * frametime / orig_fixed_frametime;
-			if(last_y < 0 && param_2 > 0){
-				scythe_time = 0;
-				//y = upper_cut_up_speed;
-			}else{
-				scythe_time += frametime;
-				if(scythe_time < orig_fixed_frametime * 4){
-					//y = upper_cut_up_speed * (orig_fixed_frametime * 4 - scythe_time) / (orig_fixed_frametime * 4);
-				}
-			}
 			// approx, would allow different servers with different lua values to work
-			if(scythe_time < orig_fixed_frametime * 4){
+			if(param_2 > 0){
 				y = param_2 * (1.0 - 0.15 * std::abs(16.0 - frametime) / 6.0);
 			}
 			LOG_VERBOSE("%s: applying scythe uppercut speed fix, y %f, y/param_2 %f, scythe_time %u", __FUNCTION__, y, y / param_2, scythe_time);
-			// they seems to have almost gotten this one right, y/param_2 is around 0.85 at 5ms, on the simulated algorithm
-			last_y = param_2;
 		}
 
-		// jump attacks
-		if(actx->actor_state == 45){
-			// only PS seems to be broken at the moment
-			// how to identify a PS?
-			//y = (-825.0) * frametime / orig_fixed_frametime;
-			/*
-			float modifier = orig_fixed_frametime / frametime;
-			y = param_2 * modifier;
-			LOG("%s: applying weapon drop fix, y %f, modifier %f", __FUNCTION__, y, modifier);
-			*/
+		// not the best way to identify a PS, but I don't see any other weapons using a -50000 drop value in lua
+		// this absolutely do not work if a server don't use -50000
+		// the PS drop makes one big drop frame on any framerate, but the speed on that single frame is scaled...
+		static bool first_ps_drop_frame = true;
+		if(actx->actor_state == 45 && set_drop_val == -50000){
+			// a little under the expected drop speed
+			float drop_cutoff = (-750.0) * (frametime / orig_fixed_frametime);
+			if(param_2 < drop_cutoff){
+				if(first_ps_drop_frame){
+					// spike the first drop frame to the 60fps value
+					// rare but there could be extra frames before
+					y = -850.0;
+					LOG_VERBOSE("%s: applying ps drop speed fix, y/param_2 %f", __FUNCTION__, y / param_2);
+					first_ps_drop_frame = false;
+				}else{
+					// 0 the rest if any, rare but happens
+					y = 0.0;
+				}
+			}
+		}else{
+			first_ps_drop_frame = true;
 		}
 	}
 
 	// on ground
 	if(ret_addr == (void *)0x00526f0e){
-		LOG("%s: applying general gravity fix", __FUNCTION__);
-		y = -125.0;
 	}
 
 	if(ret_addr == (void *)0x00526f0e || ret_addr == (void*)0x00527467){
-		LOG("%s: ctx 0x%08x, param_1 %f, param_2 %f, param_3 %f", __FUNCTION__, ctx, param_1, param_2, param_3);
-		LOG("%s: called from 0x%08x -> 0x%08x -> 0x%08x", __FUNCTION__, __builtin_return_address(2), __builtin_return_address(1), __builtin_return_address(0));
-		LOG("%s: actx->actor_state %u", __FUNCTION__, actx->actor_state);
+		LOG_VERBOSE("%s: ctx 0x%08x, param_1 %f, param_2 %f, param_3 %f", __FUNCTION__, ctx, param_1, param_2, param_3);
+		LOG_VERBOSE("%s: called from 0x%08x -> 0x%08x -> 0x%08x", __FUNCTION__, __builtin_return_address(2), __builtin_return_address(1), __builtin_return_address(0));
+		LOG_VERBOSE("%s: actx->actor_state %u", __FUNCTION__, actx->actor_state);
 	}
 
 	orig_move_actor_by(ctx, param_1, y, param_3);
@@ -410,6 +451,7 @@ int init(){
 	//hook_move_actor_exact();
 	hook_move_actor_by();
 	//hook_switch_weapon_slot();
+	hook_fun_005e4020();
 
 	experinmental_static_patches();
 
