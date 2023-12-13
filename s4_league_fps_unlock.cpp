@@ -91,6 +91,9 @@ static void (__attribute__((thiscall)) *update_time_delta)(struct time_context *
 struct ctx_01642f30{
 	uint8_t unknown[0xb0];
 	uint8_t actor_state;
+	uint8_t unknown_2[0x3];
+	uint32_t actor_substate_1;
+	uint32_t actor_substate_2;
 };
 static struct ctx_01642f30 *(*fetch_ctx_01642f30)(void) = (struct ctx_01642f30 *(*)(void)) 0x004ae0a0;
 
@@ -205,7 +208,9 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 
 	LOG_VERBOSE("%s: ctx 0x%08x, param_1 %f, param_2 %f, param_3 %f", __FUNCTION__, ctx, param_1, param_2, param_3);
 	LOG_VERBOSE("%s: called from 0x%08x -> 0x%08x -> 0x%08x", __FUNCTION__, __builtin_return_address(2), __builtin_return_address(1), ret_addr);
-	LOG_VERBOSE("%s: actx->actor_state %u", __FUNCTION__, actx->actor_state);
+	LOG("%s: actx->actor_state %u", __FUNCTION__, actx->actor_state);
+	LOG("%s: actx->actor_substate_1 0x%08x", __FUNCTION__, actx->actor_substate_1);
+	LOG("%s: actx->actor_substate_2 0x%08x", __FUNCTION__, actx->actor_substate_2);
 
 	// various fixes
 
@@ -213,11 +218,37 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 	// in air
 	if(ret_addr == (void*)0x00527467){
 		// fly
-		if(actx->actor_state == 31 && param_2 > 0.0001){
-			// simulated, should not be a lua value
-			y = 19.5 * frametime / orig_fixed_frametime;
-			LOG_VERBOSE("%s: applying fly speed fix, y %f, y/param_2 %f", __FUNCTION__, y, y / param_2);
-			// y/param_2 is roughly orig frametime/frametime, without accounting for the unnoticible at 60 gradual change
+		static bool was_flying = false;
+		bool flying = false;
+		if(actx->actor_state == 31){
+			flying = true;
+		}
+
+		if((actx->actor_state == 39 || actx->actor_state == 25) && (actx->actor_substate_2 & 0xffff) == 0x02ff){
+			flying = true;
+		}
+
+		if(actx->actor_state == 4 && was_flying){
+			flying = true;
+		}
+
+		was_flying = flying;
+
+		if(flying && param_2 > 0.0001){
+			// scaled, trying not to change the behavior too hard
+			// there is something funky with the gradual speed gain vs framerate however
+			float modifier = (orig_fixed_frametime / frametime);
+			float frametime_float = frametime * 1.0;
+			if(frametime_float < orig_fixed_frametime){
+				// whenever there's an increasing curve it gets weird
+				// it's basically area of a smoother curve vs a less smooth curve
+				float frametime_diff_ratio = (orig_fixed_frametime - frametime_float) / orig_fixed_frametime;
+				modifier = modifier * (1.0 - 0.4 * frametime_diff_ratio);
+			}
+
+			y = param_2 * modifier;
+			was_flying = true;
+			LOG_VERBOSE("%s: applying fly speed fix, y %f, y/param_2 %f", __FUNCTION__, y, modifier);
 		}
 
 		// scythe uppercut
