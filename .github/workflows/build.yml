@@ -16,7 +16,7 @@ jobs:
     - name: Install mingw
       run: |
         sudo apt update
-        sudo apt install -y gcc-mingw-w64-i686 g++-mingw-w64-i686
+        sudo apt install -y g++-mingw-w64-i686
 
     - name: Set env vars
       run: |
@@ -38,5 +38,6 @@ jobs:
         name: s4_league_fps_unlock_${{ env.sha_name }}
         path: |
            s4_league_fps_unlock.asi
+           s4_league_fps_unlock.json
            d3d9.dll
         if-no-files-found: error

@@ -7,6 +7,11 @@
 #include <cstring>
 #include <cmath>
 
+#include "json.hpp"
+#include <fstream>
+
+#include <time.h>
+
 // mingw don't provide a mprotect wrap
 #include <memoryapi.h>
 
@@ -63,9 +68,61 @@ if(!_mem_fence_ready){ \
 pthread_mutex_lock(&_mem_fence); \
 pthread_mutex_unlock(&_mem_fence);
 
-uint32_t frametime;
-uint8_t weapon_slot;
-float set_drop_val;
+struct config{
+	int max_framerate;
+	int field_of_view;
+};
+
+static uint32_t target_frametime_ns;
+
+static float frametime;
+static uint8_t weapon_slot;
+static float set_drop_val;
+
+struct config config = {
+	.max_framerate = -1,
+	.field_of_view = 60,
+};
+
+static void parse_config(){
+	const char *config_file_name = "s4_league_fps_unlock.json";
+	std::ifstream config_file(config_file_name);
+	if(!config_file.good()){
+		LOG("failed opening %s for reading", config_file_name);
+		return;
+	}
+
+	nlohmann::json parsed_config_file;
+	try{
+		parsed_config_file = nlohmann::json::parse(config_file);
+	}catch(nlohmann::json::exception e){
+		LOG("failed parsing %s, %s", config_file_name, e.what());
+		return;
+	}
+
+	try{
+		if(!parsed_config_file["max_framerate"].is_number()){
+			LOG("failed reading max_framerate from %s", config_file_name)
+		}else{
+			config.max_framerate = parsed_config_file["max_framerate"];
+			if(config.max_framerate > 0){
+				LOG("setting max framerate to %d", config.max_framerate);
+				target_frametime_ns = (1 * 1000 * 1000 * 1000) / config.max_framerate;
+				LOG("target frametime is %u ns", target_frametime_ns);
+			}else{
+				LOG("allowing game to go as fast as it can");
+			}
+		}
+		if(!parsed_config_file["field_of_view"].is_number()){
+			LOG("failed reading field_of_view from %s, ", config_file_name)
+		}else{
+			config.field_of_view = parsed_config_file["field_of_view"];
+			LOG("setting field of view to %d", config.field_of_view);
+		}
+	}catch(nlohmann::json::exception e){
+		LOG("failed reading %s after parsing, %s", config_file_name, e.what());
+	}
+}
 
 struct __attribute__ ((packed)) time_context{
 	double unknown;
@@ -96,6 +153,18 @@ struct ctx_01642f30{
 	uint32_t actor_substate_2;
 };
 static struct ctx_01642f30 *(*fetch_ctx_01642f30)(void) = (struct ctx_01642f30 *(*)(void)) 0x004ae0a0;
+
+static void redirect_fov(){
+	// fov reading on function 0x00769200
+	if(config.field_of_view != 60){
+		LOG("%s: patching fov fetching function 0x00769200", __FUNCTION__);
+		uint32_t *alternative_fov_fetch = (uint32_t *)0x00769219;
+		uint32_t *in_game_fov_fetch = (uint32_t *)0x00769228;
+		static float field_of_view = config.field_of_view;
+		*alternative_fov_fetch = (uint32_t)&field_of_view;
+		*in_game_fov_fetch = (uint32_t)&field_of_view;
+	}
+}
 
 // this is a looong function with a lot of branches, but it seems to use the SetDrop value during a jump attack
 struct ctx_fun_005e4020{
@@ -401,20 +470,38 @@ static void (__attribute__((thiscall)) *orig_game_tick)(void *);
 void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 	LOG_VERBOSE("game tick function hook fired");
 
+
 	const static float orig_speed_dampener = 0.015;
 	const static double orig_fixed_frametime = 1.66666666666666678509045596002E1;
 	static float *speed_dampener = (float *)0x015f4210;
 
 	static struct time_context tctx;
 
+	if(config.max_framerate > 0){
+		static struct timespec last_tick = {0};
+		struct timespec this_tick;
+		clock_gettime(CLOCK_MONOTONIC, &this_tick);
+
+		if(last_tick.tv_sec == 0 && last_tick.tv_nsec == 0){
+			last_tick = this_tick;
+		}else{
+			while(last_tick.tv_sec == this_tick.tv_sec && this_tick.tv_nsec - last_tick.tv_nsec < target_frametime_ns){
+				sleep(0);
+				clock_gettime(CLOCK_MONOTONIC, &this_tick);
+			}
+			last_tick = this_tick;
+		}
+	}
+
 	struct game_context *ctx = fetch_game_context();
 	LOG_VERBOSE("game context at 0x%08x", (uint32_t)ctx);
 	ctx->fps_limiter_toggle = 0;
+
 	orig_game_tick(tick_ctx);
 
 	update_time_delta(&tctx);
 	*speed_dampener = tctx.delta_t * orig_speed_dampener / orig_fixed_frametime;
-	frametime = round(tctx.delta_t);
+	frametime = tctx.delta_t;
 
 	LOG_VERBOSE("delta_t: %f, speed_dampener: %f", tctx.delta_t, *speed_dampener);
 }
@@ -478,11 +565,15 @@ int init(){
 
 	LOG("mhmm library loaded");
 
+	parse_config();
+
 	hook_game_tick();
 	//hook_move_actor_exact();
 	hook_move_actor_by();
 	//hook_switch_weapon_slot();
 	hook_fun_005e4020();
+
+	redirect_fov();
 
 	experinmental_static_patches();
 
