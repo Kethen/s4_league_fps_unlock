@@ -71,6 +71,7 @@ pthread_mutex_unlock(&_mem_fence);
 struct config{
 	int max_framerate;
 	int field_of_view;
+	int sprint_field_of_view;
 };
 
 static uint32_t target_frametime_ns;
@@ -82,6 +83,7 @@ static float set_drop_val;
 struct config config = {
 	.max_framerate = -1,
 	.field_of_view = 60,
+	.sprint_field_of_view = 80,
 };
 
 static void parse_config(){
@@ -119,6 +121,12 @@ static void parse_config(){
 			config.field_of_view = parsed_config_file["field_of_view"];
 			LOG("setting field of view to %d", config.field_of_view);
 		}
+		if(!parsed_config_file["sprint_field_of_view"].is_number()){
+			LOG("failed reading sprint_field_of_view from %s, ", config_file_name)
+		}else{
+			config.sprint_field_of_view = parsed_config_file["sprint_field_of_view"];
+			LOG("setting sprint field of view to %d", config.sprint_field_of_view);
+		}
 	}catch(nlohmann::json::exception e){
 		LOG("failed reading %s after parsing, %s", config_file_name, e.what());
 	}
@@ -154,16 +162,51 @@ struct ctx_01642f30{
 };
 static struct ctx_01642f30 *(*fetch_ctx_01642f30)(void) = (struct ctx_01642f30 *(*)(void)) 0x004ae0a0;
 
-static void redirect_fov(){
-	// fov reading on function 0x00769200
-	if(config.field_of_view != 60){
-		LOG("%s: patching fov fetching function 0x00769200", __FUNCTION__);
-		uint32_t *alternative_fov_fetch = (uint32_t *)0x00769219;
-		uint32_t *in_game_fov_fetch = (uint32_t *)0x00769228;
-		static float field_of_view = config.field_of_view;
-		*alternative_fov_fetch = (uint32_t)&field_of_view;
-		*in_game_fov_fetch = (uint32_t)&field_of_view;
+// can change active fov by hooking this
+struct ctx_fun_00766000{
+	uint8_t unknown[0x158];
+	float target_fov;
+};
+static void (__attribute__((thiscall)) *orig_fun_00766000)(void *, uint32_t);
+void __attribute__((thiscall)) patched_fun_00766000(struct ctx_fun_00766000 *ctx, uint32_t param_1){
+	if(ctx->target_fov == 60.0){
+		ctx->target_fov = config.field_of_view + 0.0001;
 	}
+	if(ctx->target_fov == 80.0){
+		ctx->target_fov = config.sprint_field_of_view + 0.0001;
+	}
+	orig_fun_00766000(ctx, param_1);
+}
+
+static void hook_fun_00766000(){
+	LOG("hooking fun_00766000");
+
+	uint8_t intended_trampoline[] = {
+		// space for original instruction
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		// MOV eax,0076600a
+		0xb8, 0x0a, 0x60, 0x76, 0x00,
+		// JMP eax
+		0xff, 0xe0
+	};
+	memcpy((void *)intended_trampoline, (void *)0x00766000, 10);
+
+	uint8_t intended_patch[] = {
+		// MOV eax, patched_fun_00766000
+		0xb8, 0, 0, 0, 0,
+		// JMP eax
+		0xff, 0xe0,
+		// nop nop nop
+		0x90, 0x90, 0x90
+	};
+	*(uint32_t *)&intended_patch[1] = (uint32_t)patched_fun_00766000;
+
+	orig_fun_00766000 = (void (__attribute__((thiscall)) *)(void*, uint32_t))VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	memcpy((void *)orig_fun_00766000, intended_trampoline, sizeof(intended_trampoline));
+	DWORD old_protect;
+	VirtualProtect((void *)orig_fun_00766000, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
+
+	memcpy((void *)0x00766000, intended_patch, sizeof(intended_patch));
 }
 
 // this is a looong function with a lot of branches, but it seems to use the SetDrop value during a jump attack
@@ -572,8 +615,7 @@ int init(){
 	hook_move_actor_by();
 	//hook_switch_weapon_slot();
 	hook_fun_005e4020();
-
-	redirect_fov();
+	hook_fun_00766000();
 
 	experinmental_static_patches();
 

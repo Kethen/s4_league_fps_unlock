@@ -1,4 +1,5 @@
 {
 	"max_framerate":300,
-	"field_of_view":60
+	"field_of_view":60,
+	"sprint_field_of_view":80
 }
