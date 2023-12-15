@@ -104,6 +104,7 @@ static void parse_config(){
 	}
 
 	struct config staging_config;
+	memcpy(&staging_config, &config, sizeof(struct config));
 
 	try{
 		if(!parsed_config_file["max_framerate"].is_number()){
