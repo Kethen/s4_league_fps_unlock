@@ -180,15 +180,18 @@ struct ctx_fun_00766000{
 };
 static void (__attribute__((thiscall)) *orig_fun_00766000)(void *, uint32_t);
 void __attribute__((thiscall)) patched_fun_00766000(struct ctx_fun_00766000 *ctx, uint32_t param_1){
+	float orig_fov = ctx->target_fov;
 	pthread_mutex_lock(&config_mutex);
 	if(ctx->target_fov == 60.0){
-		ctx->target_fov = config.field_of_view + 0.0001;
+		ctx->target_fov = config.field_of_view;
 	}
 	if(ctx->target_fov == 80.0){
-		ctx->target_fov = config.sprint_field_of_view + 0.0001;
+		ctx->target_fov = config.sprint_field_of_view;
 	}
 	pthread_mutex_unlock(&config_mutex);
+	LOG_VERBOSE("%s: ctx 0x%08x, current fov %f, override fov %f", __FUNCTION__, ctx, orig_fov, ctx->target_fov);
 	orig_fun_00766000(ctx, param_1);
+	ctx->target_fov = orig_fov;
 }
 
 static void hook_fun_00766000(){
