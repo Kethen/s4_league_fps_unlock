@@ -68,6 +68,7 @@ if(!_mem_fence_ready){ \
 pthread_mutex_lock(&_mem_fence); \
 pthread_mutex_unlock(&_mem_fence);
 
+static pthread_mutex_t config_mutex;
 struct config{
 	int max_framerate;
 	int field_of_view;
@@ -102,33 +103,42 @@ static void parse_config(){
 		return;
 	}
 
+	struct config staging_config;
+
 	try{
 		if(!parsed_config_file["max_framerate"].is_number()){
 			LOG("failed reading max_framerate from %s", config_file_name)
 		}else{
-			config.max_framerate = parsed_config_file["max_framerate"];
-			if(config.max_framerate > 0){
-				LOG("setting max framerate to %d", config.max_framerate);
-				target_frametime_ns = (1 * 1000 * 1000 * 1000) / config.max_framerate;
-				LOG("target frametime is %u ns", target_frametime_ns);
+			staging_config.max_framerate = parsed_config_file["max_framerate"];
+			if(staging_config.max_framerate > 0){
+				LOG_VERBOSE("setting max framerate to %d", staging_config.max_framerate);
 			}else{
-				LOG("allowing game to go as fast as it can");
+				LOG_VERBOSE("allowing game to go as fast as it can");
 			}
 		}
 		if(!parsed_config_file["field_of_view"].is_number()){
 			LOG("failed reading field_of_view from %s, ", config_file_name)
 		}else{
-			config.field_of_view = parsed_config_file["field_of_view"];
-			LOG("setting field of view to %d", config.field_of_view);
+			staging_config.field_of_view = parsed_config_file["field_of_view"];
+			LOG_VERBOSE("setting field of view to %d", staging_config.field_of_view);
 		}
 		if(!parsed_config_file["sprint_field_of_view"].is_number()){
 			LOG("failed reading sprint_field_of_view from %s, ", config_file_name)
 		}else{
-			config.sprint_field_of_view = parsed_config_file["sprint_field_of_view"];
-			LOG("setting sprint field of view to %d", config.sprint_field_of_view);
+			staging_config.sprint_field_of_view = parsed_config_file["sprint_field_of_view"];
+			LOG_VERBOSE("setting sprint field of view to %d", staging_config.sprint_field_of_view);
 		}
 	}catch(nlohmann::json::exception e){
 		LOG("failed reading %s after parsing, %s", config_file_name, e.what());
+	}
+
+	if(memcmp(&config, &staging_config, sizeof(struct config)) != 0){
+		pthread_mutex_lock(&config_mutex);
+		memcpy(&config, &staging_config, sizeof(struct config));
+		if(config.max_framerate > 0){
+			target_frametime_ns = (1 * 1000 * 1000 * 1000) / config.max_framerate;
+		}
+		pthread_mutex_unlock(&config_mutex);
 	}
 }
 
@@ -169,12 +179,14 @@ struct ctx_fun_00766000{
 };
 static void (__attribute__((thiscall)) *orig_fun_00766000)(void *, uint32_t);
 void __attribute__((thiscall)) patched_fun_00766000(struct ctx_fun_00766000 *ctx, uint32_t param_1){
+	pthread_mutex_lock(&config_mutex);
 	if(ctx->target_fov == 60.0){
 		ctx->target_fov = config.field_of_view + 0.0001;
 	}
 	if(ctx->target_fov == 80.0){
 		ctx->target_fov = config.sprint_field_of_view + 0.0001;
 	}
+	pthread_mutex_unlock(&config_mutex);
 	orig_fun_00766000(ctx, param_1);
 }
 
@@ -269,7 +281,7 @@ void __attribute__((thiscall)) patched_switch_weapon_slot(struct switch_weapon_s
 	if(ret_addr == (void *)0x00b9a188 || ret_addr == (void *)0x007edf3e){
 		weapon_slot = ctx->weapon_slot;
 	}
-	LOG("%s: ctx 0x%08x, param_1 %u, weapon slot switched to %u, 0x%08x -> 0x%08x", __FUNCTION__, ctx, param_1, weapon_slot, __builtin_return_address(1), __builtin_return_address(0));
+	LOG_VERBOSE("%s: ctx 0x%08x, param_1 %u, weapon slot switched to %u, 0x%08x -> 0x%08x", __FUNCTION__, ctx, param_1, weapon_slot, __builtin_return_address(1), __builtin_return_address(0));
 }
 static void hook_switch_weapon_slot(){
 	LOG("hooking switch_weapon_slot");
@@ -320,9 +332,9 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 
 	LOG_VERBOSE("%s: ctx 0x%08x, param_1 %f, param_2 %f, param_3 %f", __FUNCTION__, ctx, param_1, param_2, param_3);
 	LOG_VERBOSE("%s: called from 0x%08x -> 0x%08x -> 0x%08x", __FUNCTION__, __builtin_return_address(2), __builtin_return_address(1), ret_addr);
-	LOG("%s: actx->actor_state %u", __FUNCTION__, actx->actor_state);
-	LOG("%s: actx->actor_substate_1 0x%08x", __FUNCTION__, actx->actor_substate_1);
-	LOG("%s: actx->actor_substate_2 0x%08x", __FUNCTION__, actx->actor_substate_2);
+	LOG_VERBOSE("%s: actx->actor_state %u", __FUNCTION__, actx->actor_state);
+	LOG_VERBOSE("%s: actx->actor_substate_1 0x%08x", __FUNCTION__, actx->actor_substate_1);
+	LOG_VERBOSE("%s: actx->actor_substate_2 0x%08x", __FUNCTION__, actx->actor_substate_2);
 
 	// various fixes
 
@@ -350,11 +362,10 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 			// scaled, trying not to change the behavior too hard
 			// there is something funky with the gradual speed gain vs framerate however
 			float modifier = (orig_fixed_frametime / frametime);
-			float frametime_float = frametime * 1.0;
-			if(frametime_float < orig_fixed_frametime){
+			if(frametime < orig_fixed_frametime){
 				// whenever there's an increasing curve it gets weird
 				// it's basically area of a smoother curve vs a less smooth curve
-				float frametime_diff_ratio = (orig_fixed_frametime - frametime_float) / orig_fixed_frametime;
+				float frametime_diff_ratio = (orig_fixed_frametime - frametime) / orig_fixed_frametime;
 				modifier = modifier * (1.0 - 0.4 * frametime_diff_ratio);
 			}
 
@@ -520,6 +531,7 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 
 	static struct time_context tctx;
 
+	pthread_mutex_lock(&config_mutex);
 	if(config.max_framerate > 0){
 		static struct timespec last_tick = {0};
 		struct timespec this_tick;
@@ -535,6 +547,7 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 			last_tick = this_tick;
 		}
 	}
+	pthread_mutex_unlock(&config_mutex);
 
 	struct game_context *ctx = fetch_game_context();
 	LOG_VERBOSE("game context at 0x%08x", (uint32_t)ctx);
@@ -561,10 +574,7 @@ static void hook_game_tick(){
 	memcpy(intended_trampoline, (void *)0x00871970, 9);
 	DWORD old_protect;
 	orig_game_tick = (void (__attribute__((thiscall)) *)(void *)) VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-	if(orig_game_tick == NULL){
-		LOG("Failed allocating executable memory while preparing trampoline");
-		return;
-	}
+
 	memcpy((void *)orig_game_tick, intended_trampoline, sizeof(intended_trampoline));
 	VirtualProtect((void *)orig_game_tick, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
@@ -593,6 +603,11 @@ static void experinmental_static_patches(){
 }
 
 static void *main_thread(void *arg){
+	LOG("main thread started");
+	while(true){
+		sleep(2);
+		parse_config();
+	}
 	return NULL;
 }
 
@@ -605,6 +620,11 @@ int init(){
 		return 0;
 	}
 	#endif // ENABLE_LOGGING
+
+	if(pthread_mutex_init(&config_mutex, NULL)){
+		printf("config mutex init failed\n");
+		return 0;
+	}
 
 	LOG("mhmm library loaded");
 
