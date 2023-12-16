@@ -523,6 +523,44 @@ static void hook_move_actor_exact(){
 	memcpy((void *)0x007b0180, intended_patch, sizeof(intended_patch));
 }
 
+// 9 direct usages of 0x015f4210
+float speed_dampeners[9];
+static void redirect_speed_dampeners(){
+	LOG("%s: redirecting speed dampeners to 0x%08x to 0x%08x", __FUNCTION__, &speed_dampeners[0], &speed_dampeners[8]);
+
+	for(int i = 0;i < sizeof(speed_dampeners) / sizeof(float); i++){
+		const uint8_t value[] = {0x8f, 0xc2, 0x75, 0x3c};
+		memcpy(&speed_dampeners[i], value, sizeof value);
+	}
+
+	uint32_t *patch_location = (uint32_t *)0x00563c0e;
+	*patch_location = (uint32_t)&speed_dampeners[0];
+
+	patch_location = (uint32_t *)0x007b063d;
+	*patch_location = (uint32_t)&speed_dampeners[1];
+
+	patch_location = (uint32_t *)0x007b06aa;
+	*patch_location = (uint32_t)&speed_dampeners[2];
+
+	patch_location = (uint32_t *)0x007b1204;
+	*patch_location = (uint32_t)&speed_dampeners[3];
+
+	patch_location = (uint32_t *)0x007b120c;
+	*patch_location = (uint32_t)&speed_dampeners[4];
+
+	patch_location = (uint32_t *)0x007b1973;
+	*patch_location = (uint32_t)&speed_dampeners[5];
+
+	patch_location = (uint32_t *)0x007b19a9;
+	*patch_location = (uint32_t)&speed_dampeners[6];
+
+	patch_location = (uint32_t *)0x007b1edc;
+	*patch_location = (uint32_t)&speed_dampeners[7];
+
+	patch_location = (uint32_t *)0x007b2363;
+	*patch_location = (uint32_t)&speed_dampeners[8];
+}
+
 // function at 00871970, not essentially game tick
 static void (__attribute__((thiscall)) *orig_game_tick)(void *);
 void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
@@ -531,7 +569,6 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 
 	const static float orig_speed_dampener = 0.015;
 	const static double orig_fixed_frametime = 1.66666666666666678509045596002E1;
-	static float *speed_dampener = (float *)0x015f4210;
 
 	static struct time_context tctx;
 
@@ -560,8 +597,15 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 	orig_game_tick(tick_ctx);
 
 	update_time_delta(&tctx);
-	*speed_dampener = tctx.delta_t * orig_speed_dampener / orig_fixed_frametime;
+
 	frametime = tctx.delta_t;
+
+	float new_speed_dampener = frametime * orig_speed_dampener / orig_fixed_frametime;
+	// some kind of per frame speed filter, filters out smaller movement
+	speed_dampeners[3] = new_speed_dampener;
+	speed_dampeners[4] = new_speed_dampener;
+	// some kind of overall speed dampener
+	speed_dampeners[8] = new_speed_dampener;
 
 	LOG_VERBOSE("delta_t: %f, speed_dampener: %f", tctx.delta_t, *speed_dampener);
 }
@@ -633,6 +677,8 @@ int init(){
 	LOG("mhmm library loaded");
 
 	parse_config();
+
+	redirect_speed_dampeners();
 
 	hook_game_tick();
 	//hook_move_actor_exact();
