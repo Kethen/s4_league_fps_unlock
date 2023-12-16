@@ -184,8 +184,7 @@ void __attribute__((thiscall)) patched_fun_00766000(struct ctx_fun_00766000 *ctx
 	pthread_mutex_lock(&config_mutex);
 	if(ctx->target_fov == 60.0){
 		ctx->target_fov = config.field_of_view;
-	}
-	if(ctx->target_fov == 80.0){
+	}else if(ctx->target_fov == 80.0){
 		ctx->target_fov = config.sprint_field_of_view;
 	}
 	pthread_mutex_unlock(&config_mutex);
