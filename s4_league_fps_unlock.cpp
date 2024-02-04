@@ -52,8 +52,6 @@ NtSetTimerResolution(
 
 static ULONG min_nt_delay_100ns;
 
-#define SLEEP_BUFFER_100NS (10000 + 5000)
-
 #define ENABLE_LOGGING 0
 
 #if ENABLE_LOGGING
@@ -113,6 +111,7 @@ struct config{
 	int field_of_view;
 	int sprint_field_of_view;
 	bool framelimiter_full_busy_loop;
+	int framelimiter_busy_loop_buffer_100ns;
 };
 
 static uint32_t target_frametime_ns;
@@ -123,10 +122,11 @@ static uint8_t weapon_slot;
 static float set_drop_val;
 
 struct config config = {
-	.max_framerate = -1,
+	.max_framerate = 300,
 	.field_of_view = 60,
 	.sprint_field_of_view = 80,
 	.framelimiter_full_busy_loop = false,
+	.framelimiter_busy_loop_buffer_100ns = 15000,
 };
 
 static void parse_config(){
@@ -176,6 +176,12 @@ static void parse_config(){
 		}else{
 			staging_config.framelimiter_full_busy_loop = parsed_config_file["framelimiter_full_busy_loop"];
 			LOG_VERBOSE("setting framelimiter full busy loop to %s", staging_config.framelimiter_full_busy_loop ? "true" : "false");
+		}
+		if(!parsed_config_file["framelimiter_busy_loop_buffer_100ns"].is_number()){
+			LOG("failed reading framelimiter_busy_loop_buffer_100ns from %s, ", config_file_name)
+		}else{
+			staging_config.framelimiter_busy_loop_buffer_100ns = parsed_config_file["framelimiter_busy_loop_buffer_100ns"];
+			LOG_VERBOSE("setting framelimiter busy loop buffer (100ns) to %s", framelimiter_busy_loop_buffer_100ns);
 		}
 	}catch(nlohmann::json::exception e){
 		LOG("failed reading %s after parsing, %s", config_file_name, e.what());
@@ -637,8 +643,8 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 					// spin it all
 				}else{
 					uint32_t diff_100ns = diff_ns / 100;
-					if(target_frametime_100ns > diff_100ns + SLEEP_BUFFER_100NS){
-						uint32_t sleep_100ns = target_frametime_100ns - (diff_100ns + SLEEP_BUFFER_100NS);
+					if(target_frametime_100ns > diff_100ns + config.framelimiter_busy_loop_buffer_100ns){
+						uint32_t sleep_100ns = target_frametime_100ns - (diff_100ns + config.framelimiter_busy_loop_buffer_100ns);
 						#if LOG_VERBOSE
 						uint32_t sleep_100ns_pre_correct = sleep_100ns;
 						#endif

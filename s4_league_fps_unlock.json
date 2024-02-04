@@ -2,5 +2,6 @@
 	"max_framerate":300,
 	"field_of_view":60,
 	"sprint_field_of_view":80,
-	"framelimiter_full_busy_loop":false
+	"framelimiter_full_busy_loop":false,
+	"framelimiter_busy_loop_buffer_100ns":15000
 }
