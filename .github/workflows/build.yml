@@ -10,7 +10,7 @@ jobs:
     steps:
 
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
       # install latest pspdev sdk
     - name: Install mingw
@@ -33,7 +33,7 @@ jobs:
         mv dinput8.dll d3d9.dll
 
     - name: Push package artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: s4_league_fps_unlock_${{ env.sha_name }}
         path: |
