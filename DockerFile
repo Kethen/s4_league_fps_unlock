@@ -1,0 +1,2 @@
+FROM opensuse/tumbleweed
+RUN zypper install -y mingw32-cross-gcc-c++

@@ -12,8 +12,47 @@
 
 #include <time.h>
 
+#include <windows.h>
+
 // mingw don't provide a mprotect wrap
 #include <memoryapi.h>
+
+// http://undocumented.ntinternals.net/index.html?page=UserMode%2FUndocumented%20Functions%2FNT%20Objects%2FThread%2FNtDelayExecution.html
+extern "C"
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtDelayExecution(
+    BOOLEAN Alertable,
+    PLARGE_INTEGER DelayInterval
+    );
+
+// http://undocumented.ntinternals.net/index.html?page=UserMode%2FUndocumented%20Functions%2FTime%2FNtSetTimerResolution.html
+extern "C"
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtQueryTimerResolution(
+    PULONG MaximumTime,
+    PULONG MinimumTime,
+    PULONG CurrentTime
+    );
+
+
+// http://undocumented.ntinternals.net/index.html?page=UserMode%2FUndocumented%20Functions%2FTime%2FNtSetTimerResolution.html
+extern "C"
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtSetTimerResolution(
+    ULONG DesiredTime,
+    BOOLEAN SetResolution,
+    PULONG ActualTime
+    );
+
+static ULONG min_nt_delay_100ns;
+
+#define SLEEP_BUFFER_100NS (10000 + 5000)
 
 #define ENABLE_LOGGING 0
 
@@ -73,9 +112,11 @@ struct config{
 	int max_framerate;
 	int field_of_view;
 	int sprint_field_of_view;
+	bool framelimiter_full_busy_loop;
 };
 
 static uint32_t target_frametime_ns;
+static uint32_t target_frametime_100ns;
 
 static float frametime;
 static uint8_t weapon_slot;
@@ -85,6 +126,7 @@ struct config config = {
 	.max_framerate = -1,
 	.field_of_view = 60,
 	.sprint_field_of_view = 80,
+	.framelimiter_full_busy_loop = false,
 };
 
 static void parse_config(){
@@ -129,6 +171,12 @@ static void parse_config(){
 			staging_config.sprint_field_of_view = parsed_config_file["sprint_field_of_view"];
 			LOG_VERBOSE("setting sprint field of view to %d", staging_config.sprint_field_of_view);
 		}
+		if(!parsed_config_file["framelimiter_full_busy_loop"].is_boolean()){
+			LOG("failed reading framelimiter_full_busy_loop from %s, ", config_file_name)
+		}else{
+			staging_config.framelimiter_full_busy_loop = parsed_config_file["framelimiter_full_busy_loop"];
+			LOG_VERBOSE("setting framelimiter full busy loop to %s", staging_config.framelimiter_full_busy_loop ? "true" : "false");
+		}
 	}catch(nlohmann::json::exception e){
 		LOG("failed reading %s after parsing, %s", config_file_name, e.what());
 	}
@@ -138,6 +186,7 @@ static void parse_config(){
 		memcpy(&config, &staging_config, sizeof(struct config));
 		if(config.max_framerate > 0){
 			target_frametime_ns = (1 * 1000 * 1000 * 1000) / config.max_framerate;
+			target_frametime_100ns = target_frametime_ns / 100;
 		}
 		pthread_mutex_unlock(&config_mutex);
 	}
@@ -577,15 +626,48 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 		struct timespec this_tick;
 		clock_gettime(CLOCK_MONOTONIC, &this_tick);
 
-		if(last_tick.tv_sec == 0 && last_tick.tv_nsec == 0){
-			last_tick = this_tick;
-		}else{
-			while(last_tick.tv_sec == this_tick.tv_sec && this_tick.tv_nsec - last_tick.tv_nsec < target_frametime_ns){
-				sleep(0);
+		#if LOG_VERBOSE
+		static uint32_t tick_count = 1;
+		#endif
+
+		if(last_tick.tv_sec != 0 || last_tick.tv_nsec != 0){
+			uint32_t diff_ns = this_tick.tv_nsec - last_tick.tv_nsec;
+			while(last_tick.tv_sec == this_tick.tv_sec && diff_ns < target_frametime_ns){
+				if(config.framelimiter_full_busy_loop){
+					// spin it all
+				}else{
+					uint32_t diff_100ns = diff_ns / 100;
+					if(target_frametime_100ns > diff_100ns + SLEEP_BUFFER_100NS){
+						uint32_t sleep_100ns = target_frametime_100ns - (diff_100ns + SLEEP_BUFFER_100NS);
+						#if LOG_VERBOSE
+						uint32_t sleep_100ns_pre_correct = sleep_100ns;
+						#endif
+						// correct to multiple of min_nt_delay_100ns
+						sleep_100ns = min_nt_delay_100ns * (sleep_100ns / min_nt_delay_100ns);
+						LOG_VERBOSE("need %u pieces of 100ns delay, corrected to %u using %u", sleep_100ns_pre_correct, sleep_100ns, min_nt_delay_100ns);
+						if(sleep_100ns > 0){
+							LOG_VERBOSE("at tick %u time %u using NtDelayExecution to delay %u pieces of 100ns", tick_count, this_tick.tv_nsec, sleep_100ns);
+							LARGE_INTEGER sleep_li;
+							sleep_li.QuadPart = sleep_100ns;
+							sleep_li.QuadPart *= -1;
+							NtDelayExecution(false, &sleep_li);
+						}
+					}
+					// spin the rest
+				}
 				clock_gettime(CLOCK_MONOTONIC, &this_tick);
+				diff_ns = this_tick.tv_nsec - last_tick.tv_nsec;
+				if(last_tick.tv_sec == this_tick.tv_sec && diff_ns < target_frametime_ns){
+					LOG_VERBOSE("spinning, diff_ns %u", diff_ns);
+				}else{
+					LOG_VERBOSE("overshot by %u + %u ns", this_tick.tv_sec - last_tick.tv_sec, diff_ns - target_frametime_ns);
+				}
 			}
-			last_tick = this_tick;
 		}
+		last_tick = this_tick;
+		#if LOG_VERBOSE
+		tick_count++;
+		#endif
 	}
 	pthread_mutex_unlock(&config_mutex);
 
@@ -658,6 +740,22 @@ static void *main_thread(void *arg){
 	return NULL;
 }
 
+static void prepare_nt_timer(){
+	ULONG max_nt_delay_100ns;
+	ULONG current_nt_delay_100ns;
+	int i;
+	NtQueryTimerResolution(&max_nt_delay_100ns, &min_nt_delay_100ns, &current_nt_delay_100ns);
+	for(i = 0; i < 10; i++){
+		NtSetTimerResolution(min_nt_delay_100ns, true, &current_nt_delay_100ns);
+		if(min_nt_delay_100ns == current_nt_delay_100ns){
+			break;
+		}else{
+			LOG("NtSetTimerResolution could not set delay to minimal, trying again");
+		}
+	}
+	LOG("NtDelayExecution now has a %u * 100ns resolution accuracy", min_nt_delay_100ns);
+}
+
 __attribute__((constructor))
 int init(){
 	#if ENABLE_LOGGING
@@ -691,6 +789,8 @@ int init(){
 	LOG("now starting main thread");
 	pthread_t thread;
 	pthread_create(&thread, NULL, main_thread, NULL);
+
+	prepare_nt_timer();
 
 	LOG("gcc constructor ending");
 	return 0;
