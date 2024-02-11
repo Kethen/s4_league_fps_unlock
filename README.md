@@ -16,3 +16,7 @@
 	- when the game is rendering faster than the frame limiter, setting it to `0` would reduce cpu power usage, but might introduce latency and frametime jitter when there are active background tasks
 
 json.hpp is optained from https://github.com/nlohmann v3.11.3 release
+
+### Special thanks
+- verreater on discord for in-depth testing and various insights
+
