@@ -232,22 +232,55 @@ static struct ctx_01642f30 *(*fetch_ctx_01642f30)(void) = (struct ctx_01642f30 *
 // hook random spread calculation
 struct ctx_calculate_random_spread{
 	uint8_t unknown[0x12c];
-	uint32_t shooting;
+	uint32_t shooting; // 0x12c
 	uint8_t unknown_2[0x18];
-	uint32_t spread_type;
-	uint8_t unknown_3[0x3c];
-	uint32_t inner_verdict;
-	uint32_t inner_verdict_flipped;
-	uint32_t inner_verdict_xor_key;
-	uint8_t unknown_4[0x30];
-	uint32_t outer_verdict;
-	uint32_t outer_verdict_flipped;
-	uint32_t outer_verdict_xor_key;
+	uint32_t spread_type; // 0x148
+	uint8_t unknown_3[0x24];
+	uint32_t inner_spread_recovery; // 0x170
+	uint32_t inner_spread_recovery_flipped; // 0x174
+	uint32_t inner_spread_recovery_xor_key; // 0x178
+	uint8_t unknown_4[0xc];
+	uint32_t inner_verdict; // 0x188
+	uint32_t inner_verdict_flipped; // 0x18c
+	uint32_t inner_verdict_xor_key; // 0x190
+	uint8_t unknown_5[0x18];
+	uint32_t outer_spread_recovery; // 0x1ac
+	uint32_t outer_spread_recovery_flipped; // 0x1b0
+	uint32_t outer_spread_recovery_xor_key; // 0x1b4
+	uint8_t unknown_6[0xc];
+	uint32_t outer_verdict; // 0x1c4
+	uint32_t outer_verdict_flipped; // 0x1c8
+	uint32_t outer_verdict_xor_key; // 0x1cc
 };
 
 static void (__attribute__((thiscall)) *orig_calculate_weapon_spread)(struct ctx_calculate_random_spread *, float, uint32_t);
 void __attribute__((thiscall)) patched_calculate_weapon_spread(struct ctx_calculate_random_spread *ctx, float param_1, uint32_t param_2){
+	uint32_t orig_inner_spread_recovery = ctx->inner_spread_recovery ^ ctx->inner_spread_recovery_xor_key;
+	uint32_t orig_outer_spread_recovery = ctx->outer_spread_recovery ^ ctx->outer_spread_recovery_xor_key;
+
+	if(ctx->spread_type == 2){
+		LOG_VERBOSE("%s: random spread, ctx 0x%08x", __FUNCTION__, ctx);
+		const double orig_fixed_frametime = 1.66666666666666678509045596002E1;
+		float frametime_scale = frametime / orig_fixed_frametime;
+
+		float new_inner_spread_recovery_f = (*(float *)&orig_inner_spread_recovery) * frametime_scale;
+		float new_outer_spread_recovery_f = (*(float *)&orig_outer_spread_recovery) * frametime_scale;
+
+		ctx->inner_spread_recovery = (*(uint32_t *)&new_inner_spread_recovery_f) ^ ctx->inner_spread_recovery_xor_key;
+		ctx->inner_spread_recovery_flipped = ~ctx->inner_spread_recovery;
+
+		ctx->outer_spread_recovery = (*(uint32_t *)&new_outer_spread_recovery_f) ^ ctx->outer_spread_recovery_xor_key;
+		ctx->outer_spread_recovery_flipped = ~ctx->outer_spread_recovery;
+	}
+
 	orig_calculate_weapon_spread(ctx, param_1, param_2);
+
+	ctx->inner_spread_recovery = orig_inner_spread_recovery ^ ctx->inner_spread_recovery_xor_key;
+	ctx->inner_spread_recovery_flipped = ~ctx->inner_spread_recovery;
+
+	ctx->outer_spread_recovery = orig_outer_spread_recovery ^ ctx->outer_spread_recovery_xor_key;
+	ctx->outer_spread_recovery_flipped = ~ctx->outer_spread_recovery;
+
 	uint32_t inner_verdict = ctx->inner_verdict ^ ctx->inner_verdict_xor_key;
 	float inner_verdict_f = *(float *)&inner_verdict;
 	uint32_t outer_verdict = ctx->outer_verdict ^ ctx->outer_verdict_xor_key;
@@ -256,77 +289,6 @@ void __attribute__((thiscall)) patched_calculate_weapon_spread(struct ctx_calcul
 	LOG_VERBOSE("%s: param_1: %f, param_2: %u", __FUNCTION__, param_1, param_2);
 	LOG_VERBOSE("%s: inner_verdict: %f, outer_verdict: %f", __FUNCTION__, inner_verdict_f, outer_verdict_f);
 	LOG_VERBOSE("%s: ret chain 0x%08x -> 0x%08x -> 0x%08x -> 0x%08x", __FUNCTION__, __builtin_return_address(0), __builtin_return_address(1), __builtin_return_address(2), __builtin_return_address(3));
-
-	if(__builtin_return_address(1) == (void *)0x005ab63a && ctx->spread_type == 2){
-		LOG_VERBOSE("%s: deployed turret, ctx 0x%08x", __FUNCTION__, ctx);
-		static bool was_shooting = false;
-
-		// re-implement 60fps like behavior
-		if(ctx->shooting != 0){
-			LOG_VERBOSE("%s: shooting", __FUNCTION__, ctx);
-			static uint32_t shooting_time_ms = 0;
-			static uint64_t last_shot_ts = 0;
-			const uint32_t peak_spread_ms = 67;
-			const float peak_spread_ms_f = peak_spread_ms * 1.0;
-
-			uint32_t time_delta = frametime_accumulated - last_shot_ts;
-
-			if(was_shooting){
-				if(last_shot_ts != 0){
-					shooting_time_ms += time_delta;
-				}else{
-					shooting_time_ms = 0;
-				}
-				if(shooting_time_ms > peak_spread_ms_f){
-					shooting_time_ms = peak_spread_ms_f;
-				}
-			}else{
-				if(last_shot_ts != 0 && shooting_time_ms > time_delta){
-					shooting_time_ms -= time_delta;
-				}else{
-					shooting_time_ms = 0;
-				}
-			}
-
-			LOG_VERBOSE("%s: was_shooting: %s", __FUNCTION__, was_shooting ? "true" : "false");
-			LOG_VERBOSE("%s: time_delta: %lu", __FUNCTION__, time_delta);
-			LOG_VERBOSE("%s: shooting_time_ms: %u", __FUNCTION__, shooting_time_ms);
-			LOG_VERBOSE("%s: frametime_accumulated: %lu", __FUNCTION__, frametime_accumulated);
-			LOG_VERBOSE("%s: frametime: %f", __FUNCTION__, frametime);
-
-			last_shot_ts = frametime_accumulated;
-			was_shooting = true;
-
-			const float inner_spread_var = 0.15;
-			const float outer_spread_var = 0.5;
-
-			float inner_rand = rand() / (RAND_MAX * 1.0);
-			float outer_rand = rand() / (RAND_MAX * 1.0);
-
-			float shooting_time_ms_f = shooting_time_ms * 1.0;
-
-			LOG_VERBOSE("%s: shooting_time_ms_f: %f", __FUNCTION__, shooting_time_ms_f);
-			LOG_VERBOSE("%s: original inner_verdict: %f, original outer_verdict: %f", __FUNCTION__, inner_verdict_f, outer_verdict_f);
-
-			inner_verdict_f = 1.0 * (shooting_time_ms_f / peak_spread_ms_f) - inner_spread_var * inner_rand;
-			if(inner_verdict_f < 0){
-				inner_verdict_f = 0.0;
-			}
-			outer_verdict_f = outer_spread_var * outer_rand;
-
-			inner_verdict = *(uint32_t *)&inner_verdict_f;
-			ctx->inner_verdict = inner_verdict ^ ctx->inner_verdict_xor_key;
-			ctx->inner_verdict_flipped = ~ctx->inner_verdict;
-
-			outer_verdict = *(uint32_t *)&outer_verdict_f;
-			ctx->outer_verdict = outer_verdict ^ ctx->outer_verdict_xor_key;
-			ctx->outer_verdict_flipped = ~ctx->outer_verdict;
-			LOG_VERBOSE("%s: inner_verdict: %f, outer_verdict: %f", __FUNCTION__, inner_verdict_f, outer_verdict_f);
-		}else{
-			LOG_VERBOSE("%s: not shooting", __FUNCTION__, ctx);
-			was_shooting = false;
-		}
-	}
 
 	return;
 }
