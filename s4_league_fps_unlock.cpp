@@ -253,27 +253,52 @@ struct ctx_calculate_random_spread{
 	uint32_t outer_verdict_xor_key; // 0x1cc
 };
 
-static void (__attribute__((thiscall)) *orig_calculate_weapon_spread)(struct ctx_calculate_random_spread *, float, uint32_t);
-void __attribute__((thiscall)) patched_calculate_weapon_spread(struct ctx_calculate_random_spread *ctx, float param_1, uint32_t param_2){
+static void (__attribute__((thiscall)) *orig_calculate_weapon_spread)(struct ctx_calculate_random_spread *, uint32_t, uint8_t);
+void __attribute__((thiscall)) patched_calculate_weapon_spread(struct ctx_calculate_random_spread *ctx, uint32_t frametime_param, uint8_t param_2){
 	uint32_t orig_inner_spread_recovery = ctx->inner_spread_recovery ^ ctx->inner_spread_recovery_xor_key;
 	uint32_t orig_outer_spread_recovery = ctx->outer_spread_recovery ^ ctx->outer_spread_recovery_xor_key;
 
 	if(ctx->spread_type == 2){
 		LOG_VERBOSE("%s: random spread, ctx 0x%08x", __FUNCTION__, ctx);
-		const double orig_fixed_frametime = 1.66666666666666678509045596002E1;
-		float frametime_scale = frametime / orig_fixed_frametime;
+		if(frametime_param >= 16 && frametime_param <= 17){
+			// let 16-17 frametime to just keep the original behavior
+			orig_calculate_weapon_spread(ctx, frametime_param, param_2);
+		}else{
+			bool run_calculation = false;
+			// scale spread recovery values
+			const double orig_fixed_frametime = 1.66666666666666678509045596002E1;
 
-		float new_inner_spread_recovery_f = (*(float *)&orig_inner_spread_recovery) * frametime_scale;
-		float new_outer_spread_recovery_f = (*(float *)&orig_outer_spread_recovery) * frametime_scale;
+			if(frametime_param >= 11){
+				// up to 90fps, just scale
+				run_calculation = true;
+			}else{
+				// beyond 90 fps
+				static uint32_t accumulated_frametime_param = 0;
+				accumulated_frametime_param += frametime_param;
+				if(accumulated_frametime_param > orig_fixed_frametime){
+					run_calculation = true;
+					frametime_param = accumulated_frametime_param;
+					accumulated_frametime_param = 0;
+				}
+			}
 
-		ctx->inner_spread_recovery = (*(uint32_t *)&new_inner_spread_recovery_f) ^ ctx->inner_spread_recovery_xor_key;
-		ctx->inner_spread_recovery_flipped = ~ctx->inner_spread_recovery;
+			if(run_calculation){
+				float frametime_scale = frametime / orig_fixed_frametime;
 
-		ctx->outer_spread_recovery = (*(uint32_t *)&new_outer_spread_recovery_f) ^ ctx->outer_spread_recovery_xor_key;
-		ctx->outer_spread_recovery_flipped = ~ctx->outer_spread_recovery;
+				float new_inner_spread_recovery_f = (*(float *)&orig_inner_spread_recovery) * frametime_scale;
+				float new_outer_spread_recovery_f = (*(float *)&orig_outer_spread_recovery) * frametime_scale;
+
+				ctx->inner_spread_recovery = (*(uint32_t *)&new_inner_spread_recovery_f) ^ ctx->inner_spread_recovery_xor_key;
+				ctx->inner_spread_recovery_flipped = ~ctx->inner_spread_recovery;
+
+				ctx->outer_spread_recovery = (*(uint32_t *)&new_outer_spread_recovery_f) ^ ctx->outer_spread_recovery_xor_key;
+				ctx->outer_spread_recovery_flipped = ~ctx->outer_spread_recovery;
+
+				orig_calculate_weapon_spread(ctx, frametime_param, param_2);
+			}
+		}
 	}
 
-	orig_calculate_weapon_spread(ctx, param_1, param_2);
 
 	ctx->inner_spread_recovery = orig_inner_spread_recovery ^ ctx->inner_spread_recovery_xor_key;
 	ctx->inner_spread_recovery_flipped = ~ctx->inner_spread_recovery;
@@ -286,7 +311,7 @@ void __attribute__((thiscall)) patched_calculate_weapon_spread(struct ctx_calcul
 	uint32_t outer_verdict = ctx->outer_verdict ^ ctx->outer_verdict_xor_key;
 	float outer_verdict_f = *(float *)&outer_verdict;
 	LOG_VERBOSE("%s: ctx 0x%08x", __FUNCTION__, ctx);
-	LOG_VERBOSE("%s: param_1: %f, param_2: %u", __FUNCTION__, param_1, param_2);
+	LOG_VERBOSE("%s: frametime_param: %u, param_2: %u", __FUNCTION__, frametime_param, param_2);
 	LOG_VERBOSE("%s: inner_verdict: %f, outer_verdict: %f", __FUNCTION__, inner_verdict_f, outer_verdict_f);
 	LOG_VERBOSE("%s: ret chain 0x%08x -> 0x%08x -> 0x%08x -> 0x%08x", __FUNCTION__, __builtin_return_address(0), __builtin_return_address(1), __builtin_return_address(2), __builtin_return_address(3));
 
@@ -316,7 +341,7 @@ static void hook_calculate_weapon_spread(){
 	};
 	*(uint32_t *)&intended_patch[1] = (uint32_t)patched_calculate_weapon_spread;
 
-	orig_calculate_weapon_spread = (void (__attribute__((thiscall)) *)(struct ctx_calculate_random_spread *, float, uint32_t))VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	orig_calculate_weapon_spread = (void (__attribute__((thiscall)) *)(struct ctx_calculate_random_spread *, uint32_t, uint8_t))VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 	memcpy((void *)orig_calculate_weapon_spread, intended_trampoline, sizeof(intended_trampoline));
 	DWORD old_protect;
 	VirtualProtect((void *)orig_calculate_weapon_spread, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
