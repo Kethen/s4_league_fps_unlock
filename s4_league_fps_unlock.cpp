@@ -229,6 +229,21 @@ struct ctx_01642f30{
 };
 static struct ctx_01642f30 *(*fetch_ctx_01642f30)(void) = (struct ctx_01642f30 *(*)(void)) 0x004ae0a0;
 
+struct funny_value{
+	uint32_t value_xor;
+	uint32_t value_xor_flip;
+	uint32_t xor_key;
+};
+
+static uint32_t get_funny_value(struct funny_value *x){
+	return x->value_xor ^ x->xor_key;
+}
+
+static void set_funny_value(struct funny_value *x, uint32_t *value){
+	x->value_xor = *value ^ x->xor_key;
+	x->value_xor_flip = ~x->xor_key;
+}
+
 // hook random spread calculation
 struct ctx_calculate_random_spread{
 	uint8_t unknown[0x12c];
@@ -236,80 +251,45 @@ struct ctx_calculate_random_spread{
 	uint8_t unknown_2[0x18];
 	uint32_t spread_type; // 0x148
 	uint8_t unknown_3[0x24];
-	uint32_t inner_spread_recovery; // 0x170
-	uint32_t inner_spread_recovery_flipped; // 0x174
-	uint32_t inner_spread_recovery_xor_key; // 0x178
-	uint8_t unknown_4[0xc];
-	uint32_t inner_verdict; // 0x188
-	uint32_t inner_verdict_flipped; // 0x18c
-	uint32_t inner_verdict_xor_key; // 0x190
-	uint8_t unknown_5[0x18];
-	uint32_t outer_spread_recovery; // 0x1ac
-	uint32_t outer_spread_recovery_flipped; // 0x1b0
-	uint32_t outer_spread_recovery_xor_key; // 0x1b4
-	uint8_t unknown_6[0xc];
-	uint32_t outer_verdict; // 0x1c4
-	uint32_t outer_verdict_flipped; // 0x1c8
-	uint32_t outer_verdict_xor_key; // 0x1cc
+	struct funny_value inner_spread_recovery; // 0x170
+	struct funny_value inner_spread_change; // 0x17c
+	struct funny_value inner_verdict; // 0x188
+	uint8_t unknown_4[0x18];
+	struct funny_value outer_spread_recovery; // 0x1ac
+	struct funny_value outer_spread_change; // 0x1b8
+	struct funny_value outer_verdict; // 0x1c4
 };
 
 static void (__attribute__((thiscall)) *orig_calculate_weapon_spread)(struct ctx_calculate_random_spread *, uint32_t, uint8_t);
 void __attribute__((thiscall)) patched_calculate_weapon_spread(struct ctx_calculate_random_spread *ctx, uint32_t frametime_param, uint8_t param_2){
-	uint32_t orig_inner_spread_recovery = ctx->inner_spread_recovery ^ ctx->inner_spread_recovery_xor_key;
-	uint32_t orig_outer_spread_recovery = ctx->outer_spread_recovery ^ ctx->outer_spread_recovery_xor_key;
+	uint32_t orig_inner_spread_recovery = get_funny_value(&ctx->inner_spread_recovery);
+	uint32_t orig_outer_spread_recovery = get_funny_value(&ctx->outer_spread_recovery);
+	uint32_t orig_inner_spread_change = get_funny_value(&ctx->inner_spread_change);
+	uint32_t orig_outer_spread_change = get_funny_value(&ctx->outer_spread_change);
 
 	if(ctx->spread_type == 2){
-		LOG_VERBOSE("%s: random spread, ctx 0x%08x", __FUNCTION__, ctx);
-		if(frametime_param >= 16 && frametime_param <= 17){
-			// let 16-17 frametime to just keep the original behavior
-			orig_calculate_weapon_spread(ctx, frametime_param, param_2);
-		}else{
-			bool run_calculation = false;
-			// scale spread recovery values
-			const double orig_fixed_frametime = 1.66666666666666678509045596002E1;
-
-			if(frametime_param >= 11){
-				// up to 90fps, just scale
-				run_calculation = true;
-			}else{
-				// beyond 90 fps
-				static uint32_t accumulated_frametime_param = 0;
-				accumulated_frametime_param += frametime_param;
-				if(accumulated_frametime_param > orig_fixed_frametime){
-					run_calculation = true;
-					frametime_param = accumulated_frametime_param;
-					accumulated_frametime_param = 0;
-				}
-			}
-
-			if(run_calculation){
-				float frametime_scale = frametime / orig_fixed_frametime;
-
-				float new_inner_spread_recovery_f = (*(float *)&orig_inner_spread_recovery) * frametime_scale;
-				float new_outer_spread_recovery_f = (*(float *)&orig_outer_spread_recovery) * frametime_scale;
-
-				ctx->inner_spread_recovery = (*(uint32_t *)&new_inner_spread_recovery_f) ^ ctx->inner_spread_recovery_xor_key;
-				ctx->inner_spread_recovery_flipped = ~ctx->inner_spread_recovery;
-
-				ctx->outer_spread_recovery = (*(uint32_t *)&new_outer_spread_recovery_f) ^ ctx->outer_spread_recovery_xor_key;
-				ctx->outer_spread_recovery_flipped = ~ctx->outer_spread_recovery;
-
-				orig_calculate_weapon_spread(ctx, frametime_param, param_2);
-			}
-		}
+		// scale change up before the function
+		const double orig_fixed_frametime = 1.66666666666666678509045596002E1; // this gives a split of 16 and 17 frametimes given it's s4
+		float orig_frametime_divided_by_frametime = orig_fixed_frametime / (frametime_param * 1.0);
+		float new_inner_spread_change = *(float *)&orig_inner_spread_change * orig_frametime_divided_by_frametime;
+		float new_outer_spread_change = *(float *)&orig_outer_spread_change * orig_frametime_divided_by_frametime;
+		set_funny_value(&ctx->inner_spread_change, (uint32_t *)&new_inner_spread_change);
+		set_funny_value(&ctx->outer_spread_change, (uint32_t *)&new_outer_spread_change);
 	}
 
+	orig_calculate_weapon_spread(ctx, frametime_param, param_2);
 
-	ctx->inner_spread_recovery = orig_inner_spread_recovery ^ ctx->inner_spread_recovery_xor_key;
-	ctx->inner_spread_recovery_flipped = ~ctx->inner_spread_recovery;
+	set_funny_value(&ctx->inner_spread_recovery, &orig_inner_spread_recovery);
+	set_funny_value(&ctx->outer_spread_recovery, &orig_outer_spread_recovery);
+	set_funny_value(&ctx->inner_spread_change, &orig_inner_spread_change);
+	set_funny_value(&ctx->outer_spread_change, &orig_outer_spread_change);
 
-	ctx->outer_spread_recovery = orig_outer_spread_recovery ^ ctx->outer_spread_recovery_xor_key;
-	ctx->outer_spread_recovery_flipped = ~ctx->outer_spread_recovery;
-
-	uint32_t inner_verdict = ctx->inner_verdict ^ ctx->inner_verdict_xor_key;
+	#if ENABLE_LOGGING
+	uint32_t inner_verdict = get_funny_value(&(ctx->inner_verdict));
 	float inner_verdict_f = *(float *)&inner_verdict;
-	uint32_t outer_verdict = ctx->outer_verdict ^ ctx->outer_verdict_xor_key;
+	uint32_t outer_verdict = get_funny_value(&(ctx->outer_verdict));
 	float outer_verdict_f = *(float *)&outer_verdict;
+	#endif
 	LOG_VERBOSE("%s: ctx 0x%08x", __FUNCTION__, ctx);
 	LOG_VERBOSE("%s: frametime_param: %u, param_2: %u", __FUNCTION__, frametime_param, param_2);
 	LOG_VERBOSE("%s: inner_verdict: %f, outer_verdict: %f", __FUNCTION__, inner_verdict_f, outer_verdict_f);
