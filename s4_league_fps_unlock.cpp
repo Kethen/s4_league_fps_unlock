@@ -114,9 +114,6 @@ struct config{
 	int framelimiter_busy_loop_buffer_100ns;
 };
 
-static uint32_t target_frametime_ns;
-static uint32_t target_frametime_100ns;
-
 static float frametime;
 static uint64_t frametime_accumulated = 0;
 static uint8_t weapon_slot;
@@ -129,6 +126,9 @@ struct config config = {
 	.framelimiter_full_busy_loop = false,
 	.framelimiter_busy_loop_buffer_100ns = 15000,
 };
+
+static uint32_t target_frametime_ns = (1 * 1000 * 1000 * 1000) / config.max_framerate;
+static uint32_t target_frametime_100ns = target_frametime_ns / 100;
 
 static void parse_config(){
 	const char *config_file_name = "s4_league_fps_unlock.json";
