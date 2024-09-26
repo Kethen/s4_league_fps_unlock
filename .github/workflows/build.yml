@@ -28,7 +28,7 @@ jobs:
 
     - name: Fetch ThirteenAG's asi loader
       run: |
-        wget https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v6.5.0/Ultimate-ASI-Loader.zip
+        wget https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v7.7.0/Ultimate-ASI-Loader.zip
         unzip Ultimate-ASI-Loader.zip
         mv dinput8.dll d3d9.dll
 
