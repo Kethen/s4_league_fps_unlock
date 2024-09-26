@@ -109,6 +109,7 @@ static pthread_mutex_t config_mutex;
 struct config{
 	int max_framerate;
 	int field_of_view;
+	int center_field_of_view;
 	int sprint_field_of_view;
 	bool framelimiter_full_busy_loop;
 	int framelimiter_busy_loop_buffer_100ns;
@@ -122,6 +123,7 @@ static float set_drop_val;
 struct config config = {
 	.max_framerate = 300,
 	.field_of_view = 60,
+	.center_field_of_view = 66,
 	.sprint_field_of_view = 80,
 	.framelimiter_full_busy_loop = false,
 	.framelimiter_busy_loop_buffer_100ns = 15000,
@@ -165,6 +167,12 @@ static void parse_config(){
 		}else{
 			staging_config.field_of_view = parsed_config_file["field_of_view"];
 			LOG_VERBOSE("setting field of view to %d", staging_config.field_of_view);
+		}
+		if(!parsed_config_file["center_field_of_view"].is_number()){
+			LOG("failed reading center_field_of_view from %s, ", config_file_name)
+		}else{
+			staging_config.center_field_of_view = parsed_config_file["center_field_of_view"];
+			LOG_VERBOSE("setting center field of view to %d", staging_config.center_field_of_view);
 		}
 		if(!parsed_config_file["sprint_field_of_view"].is_number()){
 			LOG("failed reading sprint_field_of_view from %s, ", config_file_name)
@@ -340,6 +348,8 @@ void __attribute__((thiscall)) patched_fun_00766000(struct ctx_fun_00766000 *ctx
 	pthread_mutex_lock(&config_mutex);
 	if(ctx->target_fov == 60.0){
 		ctx->target_fov = config.field_of_view;
+	}else if(ctx->target_fov == 66.0){
+		ctx->target_fov = config.center_field_of_view;
 	}else if(ctx->target_fov == 80.0){
 		ctx->target_fov = config.sprint_field_of_view;
 	}
