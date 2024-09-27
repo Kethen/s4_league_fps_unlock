@@ -40,4 +40,5 @@ jobs:
            s4_league_fps_unlock.asi
            s4_league_fps_unlock.json
            d3d9.dll
+           d3d9.ini
         if-no-files-found: error
