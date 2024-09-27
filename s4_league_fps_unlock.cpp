@@ -17,6 +17,10 @@
 // mingw don't provide a mprotect wrap
 #include <memoryapi.h>
 
+// threads
+#include <processthreadsapi.h>
+#include <tlhelp32.h>
+
 // http://undocumented.ntinternals.net/index.html?page=UserMode%2FUndocumented%20Functions%2FNT%20Objects%2FThread%2FNtDelayExecution.html
 extern "C"
 NTSYSAPI
@@ -796,6 +800,9 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 		tick_count++;
 		#endif
 	}
+	if(config.max_framerate > 0 && !should_limit){
+		sleep(0);
+	}
 	pthread_mutex_unlock(&config_mutex);
 
 	uint8_t fps_limiter_toggle_orig = ctx->fps_limiter_toggle;
@@ -906,10 +913,38 @@ static void *delayed_init_thread(void *arg){
 
 	parse_config();
 
+	// https://learn.microsoft.com/en-us/windows/win32/toolhelp/traversing-the-thread-list
+	DWORD this_thread = GetCurrentThreadId();
+	HANDLE threads_snap = CreateToolhelp32Snapshot( TH32CS_SNAPTHREAD, 0);
+	THREADENTRY32 te32;
+	if(threads_snap == INVALID_HANDLE_VALUE){
+		LOG("cannot suspend before hooking");
+	}else{
+		LOG("suspending threads before hooking");
+		te32.dwSize = sizeof(THREADENTRY32 );
+		if(Thread32First(threads_snap, &te32)){
+			do{
+				if(te32.th32ThreadID != this_thread){
+					HANDLE thread_handle = OpenThread(THREAD_SUSPEND_RESUME, 0, te32.th32ThreadID);
+					if(thread_handle != INVALID_HANDLE_VALUE){
+						int ret = SuspendThread(thread_handle);
+						if(ret == -1){
+							LOG("failed suspending thread with id %u\n", te32.th32ThreadID);
+						}
+						CloseHandle(thread_handle);
+					}else{
+						LOG("failed fetching handle for thread with id %u during suspend\n", te32.th32ThreadID);
+					}
+				}
+			}while(Thread32Next(threads_snap, &te32));
+		}else{
+			LOG("failed fetching the first thread entry, not suspending threads before hooking");
+			CloseHandle(threads_snap);
+			threads_snap = INVALID_HANDLE_VALUE;
+		}
+	}
 
 	redirect_speed_dampeners();
-
-
 	hook_game_tick();
 	//hook_move_actor_exact();
 	hook_move_actor_by();
@@ -917,8 +952,32 @@ static void *delayed_init_thread(void *arg){
 	hook_fun_005efcb0();
 	hook_fun_00780b20();
 	hook_calculate_weapon_spread();
-
 	experinmental_static_patches();
+
+	if(threads_snap != INVALID_HANDLE_VALUE){
+		LOG("resuming thrads after hooking")
+		if(Thread32First(threads_snap, &te32)){
+			do{
+				if(te32.th32ThreadID != this_thread){
+					HANDLE thread_handle = OpenThread(THREAD_SUSPEND_RESUME, 0, te32.th32ThreadID);
+					if(thread_handle != INVALID_HANDLE_VALUE){
+						int ret = ResumeThread(thread_handle);
+						if(ret == -1){
+							LOG("failed resuming thread with id %u, terminating!\n", te32.th32ThreadID);
+							exit(1);
+						}
+						CloseHandle(thread_handle);
+					}else{
+						LOG("failed fetching handle for thread with id %u during resume, terminating!\n", te32.th32ThreadID);
+						exit(1);
+					}
+				}
+			}while(Thread32Next(threads_snap, &te32));
+		}else{
+			LOG("failed fetching the first thread entry, cannot resume threads, terminating!");
+			exit(1);
+		}
+	}
 
 	LOG("now starting main thread");
 	pthread_t thread;
