@@ -224,18 +224,18 @@ struct __attribute__ ((packed)) game_context{
 	uint8_t fps_limiter_toggle;
 };
 
-static struct game_context *(*fetch_game_context)(void) = (struct game_context *(*)(void)) 0x004ad790;
-static void (__attribute__((thiscall)) *update_time_delta)(struct time_context *ctx) = (void (__attribute__((thiscall)) *)(struct time_context *ctx)) 0x00ff7f30;
+static struct game_context *(*fetch_game_context)(void) = (struct game_context *(*)(void)) 0x004aeb70;
+static void (__attribute__((thiscall)) *update_time_delta)(struct time_context *ctx) = (void (__attribute__((thiscall)) *)(struct time_context *ctx)) 0x010ada90;
 
 // contains actor state
-struct ctx_01642f30{
-	uint8_t unknown[0xb0];
+struct ctx_01b29540{
+	uint8_t unknown[0xe0];
 	uint8_t actor_state;
 	uint8_t unknown_2[0x3];
 	uint32_t actor_substate_1;
 	uint32_t actor_substate_2;
 };
-static struct ctx_01642f30 *(*fetch_ctx_01642f30)(void) = (struct ctx_01642f30 *(*)(void)) 0x004ae0a0;
+static struct ctx_01b29540 *(*fetch_ctx_01b29540)(void) = (struct ctx_01b29540 *(*)(void)) 0x004af440;
 
 struct funny_value{
 	uint32_t value_xor;
@@ -312,12 +312,12 @@ static void hook_calculate_weapon_spread(){
 	uint8_t intended_trampoline[] = {
 		// space for original instruction
 		0, 0, 0, 0, 0, 0, 0, 0, 0,
-		// MOV eax,0058c809
-		0xb8, 0x09, 0xc8, 0x58, 0x00,
+		// MOV eax,005970a9
+		0xb8, 0xa9, 0x70, 0x59, 0x00,
 		// JMP eax
 		0xff, 0xe0
 	};
-	memcpy((void *)intended_trampoline, (void *)0x0058c800, 9);
+	memcpy((void *)intended_trampoline, (void *)0x005970a0, 9);
 
 	uint8_t intended_patch[] = {
 		// MOV eax, patched_calculate_weapon_spread
@@ -334,16 +334,16 @@ static void hook_calculate_weapon_spread(){
 	DWORD old_protect;
 	VirtualProtect((void *)orig_calculate_weapon_spread, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
-	memcpy((void *)0x0058c800, intended_patch, sizeof(intended_patch));
+	memcpy((void *)0x005970a0, intended_patch, sizeof(intended_patch));
 }
 
 // can change active fov by hooking this
-struct ctx_fun_00766000{
+struct ctx_fun_00780b20{
 	uint8_t unknown[0x158];
 	float target_fov;
 };
-static void (__attribute__((thiscall)) *orig_fun_00766000)(void *, uint32_t);
-void __attribute__((thiscall)) patched_fun_00766000(struct ctx_fun_00766000 *ctx, uint32_t param_1){
+static void (__attribute__((thiscall)) *orig_fun_00780b20)(void *, uint32_t);
+void __attribute__((thiscall)) patched_fun_00780b20(struct ctx_fun_00780b20 *ctx, uint32_t param_1){
 	float orig_fov = ctx->target_fov;
 	pthread_mutex_lock(&config_mutex);
 	if(ctx->target_fov == 60.0){
@@ -355,87 +355,88 @@ void __attribute__((thiscall)) patched_fun_00766000(struct ctx_fun_00766000 *ctx
 	}
 	pthread_mutex_unlock(&config_mutex);
 	LOG_VERBOSE("%s: ctx 0x%08x, current fov %f, override fov %f", __FUNCTION__, ctx, orig_fov, ctx->target_fov);
-	orig_fun_00766000(ctx, param_1);
+	orig_fun_00780b20(ctx, param_1);
 	ctx->target_fov = orig_fov;
 }
 
-static void hook_fun_00766000(){
-	LOG("hooking fun_00766000");
+static void hook_fun_00780b20(){
+	LOG("hooking fun_00780b20");
 
 	uint8_t intended_trampoline[] = {
 		// space for original instruction
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		// MOV eax,0076600a
-		0xb8, 0x0a, 0x60, 0x76, 0x00,
+		// MOV eax,00780b2a
+		0xb8, 0x2a, 0x0b, 0x78, 0x00,
 		// JMP eax
 		0xff, 0xe0
 	};
-	memcpy((void *)intended_trampoline, (void *)0x00766000, 10);
+	memcpy((void *)intended_trampoline, (void *)0x00780b20, 10);
 
 	uint8_t intended_patch[] = {
-		// MOV eax, patched_fun_00766000
+		// MOV eax, patched_fun_00780b20
 		0xb8, 0, 0, 0, 0,
 		// JMP eax
 		0xff, 0xe0,
 		// nop nop nop
 		0x90, 0x90, 0x90
 	};
-	*(uint32_t *)&intended_patch[1] = (uint32_t)patched_fun_00766000;
+	*(uint32_t *)&intended_patch[1] = (uint32_t)patched_fun_00780b20;
 
-	orig_fun_00766000 = (void (__attribute__((thiscall)) *)(void*, uint32_t))VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-	memcpy((void *)orig_fun_00766000, intended_trampoline, sizeof(intended_trampoline));
+	orig_fun_00780b20 = (void (__attribute__((thiscall)) *)(void*, uint32_t))VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	memcpy((void *)orig_fun_00780b20, intended_trampoline, sizeof(intended_trampoline));
 	DWORD old_protect;
-	VirtualProtect((void *)orig_fun_00766000, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
+	VirtualProtect((void *)orig_fun_00780b20, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
-	memcpy((void *)0x00766000, intended_patch, sizeof(intended_patch));
+	memcpy((void *)0x00780b20, intended_patch, sizeof(intended_patch));
 }
 
 // this is a looong function with a lot of branches, but it seems to use the SetDrop value during a jump attack
-struct ctx_fun_005e4020{
+struct ctx_fun_005efcb0{
 	uint8_t unknown[0x2cc + 0x4];
 	float set_drop_val;
 };
-static void (__attribute__((thiscall)) *orig_fun_005e4020)(void *, uint32_t);
-void __attribute__((thiscall)) patched_fun_005e4020(struct ctx_fun_005e4020 *ctx, uint32_t param_1){
-	orig_fun_005e4020(ctx, param_1);
-	if((void *)0x0051f508 == __builtin_return_address(1)){
+static void (__attribute__((thiscall)) *orig_fun_005efcb0)(void *, uint32_t);
+void __attribute__((thiscall)) patched_fun_005efcb0(struct ctx_fun_005efcb0 *ctx, uint32_t param_1){
+	orig_fun_005efcb0(ctx, param_1);
+	if((void *)0x0052438c == __builtin_return_address(1)){
 		set_drop_val = ctx->set_drop_val;
 		LOG_VERBOSE("%s: updating player set_drop_val to %f", __FUNCTION__, set_drop_val);
 	}
 	LOG_VERBOSE("%s: ctx 0x%08x, param_1 %u, set_drop_val %f, 0x%08x -> 0x%08x -> 0x%08x", __FUNCTION__, ctx, param_1, ctx->set_drop_val, __builtin_return_address(2), __builtin_return_address(1), __builtin_return_address(0));
 }
 
-static void hook_fun_005e4020(){
-	LOG("hooking fun_005e4020");
+static void hook_fun_005efcb0(){
+	LOG("hooking fun_005efcb0");
 
 	uint8_t intended_trampoline[] = {
 		// space for original instruction
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		// MOV eax,0x005e402a
-		0xb8, 0x2a, 0x40, 0x5e, 0x00,
+		// MOV eax,0x005efcba
+		0xb8, 0xba, 0xfc, 0x5e, 0x00,
 		// JMP eax
 		0xff, 0xe0
 	};
-	memcpy((void *)intended_trampoline, (void *)0x005e4020, 10);
+	memcpy((void *)intended_trampoline, (void *)0x005efcb0, 10);
 
 	uint8_t intended_patch[] = {
-		// MOV eax, patched_fun_005e4020
+		// MOV eax, patched_fun_005efcb0
 		0xb8, 0, 0, 0, 0,
 		// JMP eax
 		0xff, 0xe0,
 		// nop nop nop
 		0x90, 0x90, 0x90
 	};
-	*(uint32_t *)&intended_patch[1] = (uint32_t)patched_fun_005e4020;
+	*(uint32_t *)&intended_patch[1] = (uint32_t)patched_fun_005efcb0;
 
-	orig_fun_005e4020 = (void (__attribute__((thiscall)) *)(void*, uint32_t))VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-	memcpy((void *)orig_fun_005e4020, intended_trampoline, sizeof(intended_trampoline));
+	orig_fun_005efcb0 = (void (__attribute__((thiscall)) *)(void*, uint32_t))VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	memcpy((void *)orig_fun_005efcb0, intended_trampoline, sizeof(intended_trampoline));
 	DWORD old_protect;
-	VirtualProtect((void *)orig_fun_005e4020, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
+	VirtualProtect((void *)orig_fun_005efcb0, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
-	memcpy((void *)0x005e4020, intended_patch, sizeof(intended_patch));
+	memcpy((void *)0x005efcb0, intended_patch, sizeof(intended_patch));
 }
 
+// TODO find s10 offset, this function is also not used at the moment
 // it seems that weapon slot switch of all actors goes here
 struct __attribute__((packed)) switch_weapon_slot_ctx{
 	uint8_t unknown[0x24];
@@ -497,10 +498,13 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 
 	void *ret_addr = __builtin_return_address(0);
 
-	struct ctx_01642f30* actx = fetch_ctx_01642f30();
+	struct ctx_01b29540* actx = fetch_ctx_01b29540();
+
+	// something odd is happening here after porting from s8 to s10, might have to reserve a float register here somehow
 
 	LOG_VERBOSE("%s: ctx 0x%08x, param_1 %f, param_2 %f, param_3 %f", __FUNCTION__, ctx, param_1, param_2, param_3);
 	LOG_VERBOSE("%s: called from 0x%08x -> 0x%08x -> 0x%08x", __FUNCTION__, __builtin_return_address(2), __builtin_return_address(1), ret_addr);
+	LOG_VERBOSE("%s: actx 0x%08x", __FUNCTION__, actx);
 	LOG_VERBOSE("%s: actx->actor_state %u", __FUNCTION__, actx->actor_state);
 	LOG_VERBOSE("%s: actx->actor_substate_1 0x%08x", __FUNCTION__, actx->actor_substate_1);
 	LOG_VERBOSE("%s: actx->actor_substate_2 0x%08x", __FUNCTION__, actx->actor_substate_2);
@@ -509,7 +513,7 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 
 	float y = param_2;
 	// in air
-	if(ret_addr == (void*)0x00527467){
+	if(ret_addr == (void*)0x0052c487){
 		// fly
 		static bool was_flying = false;
 		bool flying = false;
@@ -577,10 +581,10 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 	}
 
 	// on ground
-	if(ret_addr == (void *)0x00526f0e){
+	if(ret_addr == (void *)0x0052bf2e){
 	}
 
-	if(ret_addr == (void *)0x00526f0e || ret_addr == (void*)0x00527467){
+	if(ret_addr == (void *)0x0052c487 || ret_addr == (void*)0x0052bf2e){
 		LOG_VERBOSE("%s: ctx 0x%08x, param_1 %f, param_2 %f, param_3 %f", __FUNCTION__, ctx, param_1, param_2, param_3);
 		LOG_VERBOSE("%s: called from 0x%08x -> 0x%08x -> 0x%08x", __FUNCTION__, __builtin_return_address(2), __builtin_return_address(1), __builtin_return_address(0));
 		LOG_VERBOSE("%s: actx->actor_state %u", __FUNCTION__, actx->actor_state);
@@ -595,12 +599,12 @@ static void hook_move_actor_by(){
 	uint8_t intended_trampoline[] = {
 		// space for original instruction
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		// MOV eax,0x0051c2fa
-		0xb8, 0xfa, 0xc2, 0x51, 0x00,
+		// MOV eax,0052103a
+		0xb8, 0x3a, 0x10, 0x52, 0x00,
 		// JMP eax
 		0xff, 0xe0
 	};
-	memcpy((void *)intended_trampoline, (void *)0x0051c2f0, 10);
+	memcpy((void *)intended_trampoline, (void *)0x00521030, 10);
 
 	uint8_t intended_patch[] = {
 		// MOV eax, patched_move_actor_by
@@ -617,9 +621,10 @@ static void hook_move_actor_by(){
 	DWORD old_protect;
 	VirtualProtect((void *)orig_move_actor_by, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
-	memcpy((void *)0x0051c2f0, intended_patch, sizeof(intended_patch));
+	memcpy((void *)0x00521030, intended_patch, sizeof(intended_patch));
 }
 
+// TODO find s10 offset, this function is also not used at the moment
 // it seems that every intended coord change goes here, then it gets processed before applied
 struct __attribute__ ((packed)) move_actor_exact_ctx{
 	// float 0x684 x, 0x688 y, 0x68c z
@@ -698,31 +703,31 @@ static void redirect_speed_dampeners(){
 		memcpy(&speed_dampeners[i], value, sizeof value);
 	}
 
-	uint32_t *patch_location = (uint32_t *)0x00563c0e;
+	uint32_t *patch_location = (uint32_t *)0x0056b25e;
 	*patch_location = (uint32_t)&speed_dampeners[0];
 
-	patch_location = (uint32_t *)0x007b063d;
+	patch_location = (uint32_t *)0x007d040d;
 	*patch_location = (uint32_t)&speed_dampeners[1];
 
-	patch_location = (uint32_t *)0x007b06aa;
+	patch_location = (uint32_t *)0x007d047a;
 	*patch_location = (uint32_t)&speed_dampeners[2];
 
-	patch_location = (uint32_t *)0x007b1204;
+	patch_location = (uint32_t *)0x007d0fd4;
 	*patch_location = (uint32_t)&speed_dampeners[3];
 
-	patch_location = (uint32_t *)0x007b120c;
+	patch_location = (uint32_t *)0x007d0fdc;
 	*patch_location = (uint32_t)&speed_dampeners[4];
 
-	patch_location = (uint32_t *)0x007b1973;
+	patch_location = (uint32_t *)0x007d1743;
 	*patch_location = (uint32_t)&speed_dampeners[5];
 
-	patch_location = (uint32_t *)0x007b19a9;
+	patch_location = (uint32_t *)0x007d1779;
 	*patch_location = (uint32_t)&speed_dampeners[6];
 
-	patch_location = (uint32_t *)0x007b1edc;
+	patch_location = (uint32_t *)0x007d1cac;
 	*patch_location = (uint32_t)&speed_dampeners[7];
 
-	patch_location = (uint32_t *)0x007b2363;
+	patch_location = (uint32_t *)0x007d2133;
 	*patch_location = (uint32_t)&speed_dampeners[8];
 }
 
@@ -737,8 +742,13 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 
 	static struct time_context tctx;
 
+	struct game_context *ctx = fetch_game_context();
+	LOG_VERBOSE("game context at 0x%08x", (uint32_t)ctx);
+
+	bool should_limit = ctx->fps_limiter_toggle != 0;
+
 	pthread_mutex_lock(&config_mutex);
-	if(config.max_framerate > 0){
+	if(config.max_framerate > 0 && should_limit){
 		static struct timespec last_tick = {0};
 		struct timespec this_tick;
 		clock_gettime(CLOCK_MONOTONIC, &this_tick);
@@ -788,11 +798,10 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 	}
 	pthread_mutex_unlock(&config_mutex);
 
-	struct game_context *ctx = fetch_game_context();
-	LOG_VERBOSE("game context at 0x%08x", (uint32_t)ctx);
+	uint8_t fps_limiter_toggle_orig = ctx->fps_limiter_toggle;
 	ctx->fps_limiter_toggle = 0;
-
 	orig_game_tick(tick_ctx);
+	ctx->fps_limiter_toggle = fps_limiter_toggle_orig;
 
 	update_time_delta(&tctx);
 
@@ -814,12 +823,12 @@ static void hook_game_tick(){
 	uint8_t intended_trampoline[] = {
 		// original 9 bytes
 		0, 0, 0, 0, 0, 0, 0, 0, 0,
-		// MOV EAX,0x00871979
-		0xb8, 0x79, 0x19, 0x87, 0x00,
+		// MOV EAX,0x0089f409
+		0xb8, 0x09, 0xf4, 0x89, 0x00,
 		// JMP EAX
 		0xff, 0xe0
 	};
-	memcpy(intended_trampoline, (void *)0x00871970, 9);
+	memcpy(intended_trampoline, (void *)0x0089f400, 9);
 	DWORD old_protect;
 	orig_game_tick = (void (__attribute__((thiscall)) *)(void *)) VirtualAlloc(NULL, sizeof(intended_trampoline), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 
@@ -827,7 +836,6 @@ static void hook_game_tick(){
 	VirtualProtect((void *)orig_game_tick, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
 	uint32_t patched_function_location = (uint32_t)patched_game_tick;
-	uint8_t *patch_location = (uint8_t*)0x00871970;
 	uint8_t intended_patch[] = {
 		// MOV EAX,patched_game_tick
 		0xb8, 0, 0, 0, 0,
@@ -837,7 +845,7 @@ static void hook_game_tick(){
 		0x90, 0x90
 	};
 	memcpy((void *)&intended_patch[1], (void *)&patched_function_location, 4);
-	memcpy((void *)0x00871970, intended_patch, sizeof(intended_patch));
+	memcpy((void *)0x0089f400, intended_patch, sizeof(intended_patch));
 }
 
 static void patch_min_frametime(double min_frametime){
@@ -875,8 +883,7 @@ static void prepare_nt_timer(){
 	LOG("NtDelayExecution now has a %u * 100ns resolution accuracy", min_nt_delay_100ns);
 }
 
-__attribute__((constructor))
-int init(){
+static void *delayed_init_thread(void *arg){
 	#if ENABLE_LOGGING
 	log_file = fopen("s4_league_fps_unlock.log", "w");
 	if(pthread_mutex_init(&log_mutex, NULL)){
@@ -889,19 +896,26 @@ int init(){
 		printf("config mutex init failed\n");
 		return 0;
 	}
+	int delay_sec = 10;
+	LOG("delayed init thread started, delaying for %d seconds\n", delay_sec);
+	sleep(delay_sec);
 
-	LOG("mhmm library loaded");
+	// might need to pause all threads here before hooking
+
+	prepare_nt_timer();
 
 	parse_config();
 
+
 	redirect_speed_dampeners();
+
 
 	hook_game_tick();
 	//hook_move_actor_exact();
 	hook_move_actor_by();
 	//hook_switch_weapon_slot();
-	hook_fun_005e4020();
-	hook_fun_00766000();
+	hook_fun_005efcb0();
+	hook_fun_00780b20();
 	hook_calculate_weapon_spread();
 
 	experinmental_static_patches();
@@ -910,8 +924,13 @@ int init(){
 	pthread_t thread;
 	pthread_create(&thread, NULL, main_thread, NULL);
 
-	prepare_nt_timer();
+	return NULL;
+}
 
-	LOG("gcc constructor ending");
+__attribute__((constructor))
+int init(){
+	pthread_t thread;
+	pthread_create(&thread, NULL, delayed_init_thread, NULL);
+
 	return 0;
 }
