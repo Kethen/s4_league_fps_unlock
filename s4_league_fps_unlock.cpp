@@ -22,6 +22,7 @@
 #include <tlhelp32.h>
 
 // module information
+#define PSAPI_VERSION 2
 #include <psapi.h>
 #include <libloaderapi.h>
 
