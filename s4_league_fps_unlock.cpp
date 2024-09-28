@@ -109,6 +109,11 @@ if(!_mem_fence_ready){ \
 pthread_mutex_lock(&_mem_fence); \
 pthread_mutex_unlock(&_mem_fence);
 
+#define PATCH_UINT32(l, v){ \
+	uint32_t _val = (uint32_t)v; \
+	patch_memory((uint8_t *)l, (uint8_t *)&_val, 4); \
+}
+
 static pthread_mutex_t config_mutex;
 struct config{
 	int max_framerate;
@@ -135,6 +140,14 @@ struct config config = {
 
 static uint32_t target_frametime_ns = (1 * 1000 * 1000 * 1000) / config.max_framerate;
 static uint32_t target_frametime_100ns = target_frametime_ns / 100;
+
+static void patch_memory(uint8_t *location, uint8_t *buffer, uint32_t size){
+	DWORD orig_protect;
+	DWORD old_protect;
+	VirtualProtect((void *)location, size, PAGE_EXECUTE_READWRITE, &orig_protect);
+	memcpy(location, buffer, size);
+	VirtualProtect((void *)location, size, orig_protect, &old_protect);
+}
 
 static void parse_config(){
 	const char *config_file_name = "s4_league_fps_unlock.json";
@@ -338,7 +351,7 @@ static void hook_calculate_weapon_spread(){
 	DWORD old_protect;
 	VirtualProtect((void *)orig_calculate_weapon_spread, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
-	memcpy((void *)0x005970a0, intended_patch, sizeof(intended_patch));
+	patch_memory((uint8_t *)0x005970a0, intended_patch, sizeof(intended_patch));
 }
 
 // can change active fov by hooking this
@@ -391,7 +404,7 @@ static void hook_fun_00780b20(){
 	DWORD old_protect;
 	VirtualProtect((void *)orig_fun_00780b20, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
-	memcpy((void *)0x00780b20, intended_patch, sizeof(intended_patch));
+	patch_memory((uint8_t *)0x00780b20, intended_patch, sizeof(intended_patch));
 }
 
 // this is a looong function with a lot of branches, but it seems to use the SetDrop value during a jump attack
@@ -437,7 +450,7 @@ static void hook_fun_005efcb0(){
 	DWORD old_protect;
 	VirtualProtect((void *)orig_fun_005efcb0, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
-	memcpy((void *)0x005efcb0, intended_patch, sizeof(intended_patch));
+	patch_memory((uint8_t *)0x005efcb0, intended_patch, sizeof(intended_patch));
 }
 
 // TODO find s10 offset, this function is also not used at the moment
@@ -485,7 +498,7 @@ static void hook_switch_weapon_slot(){
 	DWORD old_protect;
 	VirtualProtect((void *)orig_switch_weapon_slot, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
-	memcpy((void *)0x00b99900, intended_patch, sizeof(intended_patch));
+	patch_memory((uint8_t *)0x00b99900, intended_patch, sizeof(intended_patch));
 }
 
 // it seems that all intended movement delta goes here
@@ -625,7 +638,7 @@ static void hook_move_actor_by(){
 	DWORD old_protect;
 	VirtualProtect((void *)orig_move_actor_by, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
-	memcpy((void *)0x00521030, intended_patch, sizeof(intended_patch));
+	patch_memory((uint8_t *)0x00521030, intended_patch, sizeof(intended_patch));
 }
 
 // TODO find s10 offset, this function is also not used at the moment
@@ -694,7 +707,7 @@ static void hook_move_actor_exact(){
 	DWORD old_protect;
 	VirtualProtect((void *)orig_move_actor_exact, sizeof(intended_trampoline), PAGE_EXECUTE_READ, &old_protect);
 
-	memcpy((void *)0x007b0180, intended_patch, sizeof(intended_patch));
+	patch_memory((uint8_t *)0x007b0180, intended_patch, sizeof(intended_patch));
 }
 
 // 9 direct usages of 0x015f4210
@@ -707,32 +720,15 @@ static void redirect_speed_dampeners(){
 		memcpy(&speed_dampeners[i], value, sizeof value);
 	}
 
-	uint32_t *patch_location = (uint32_t *)0x0056b25e;
-	*patch_location = (uint32_t)&speed_dampeners[0];
-
-	patch_location = (uint32_t *)0x007d040d;
-	*patch_location = (uint32_t)&speed_dampeners[1];
-
-	patch_location = (uint32_t *)0x007d047a;
-	*patch_location = (uint32_t)&speed_dampeners[2];
-
-	patch_location = (uint32_t *)0x007d0fd4;
-	*patch_location = (uint32_t)&speed_dampeners[3];
-
-	patch_location = (uint32_t *)0x007d0fdc;
-	*patch_location = (uint32_t)&speed_dampeners[4];
-
-	patch_location = (uint32_t *)0x007d1743;
-	*patch_location = (uint32_t)&speed_dampeners[5];
-
-	patch_location = (uint32_t *)0x007d1779;
-	*patch_location = (uint32_t)&speed_dampeners[6];
-
-	patch_location = (uint32_t *)0x007d1cac;
-	*patch_location = (uint32_t)&speed_dampeners[7];
-
-	patch_location = (uint32_t *)0x007d2133;
-	*patch_location = (uint32_t)&speed_dampeners[8];
+	PATCH_UINT32(0x0056b25e, &speed_dampeners[0]);
+	PATCH_UINT32(0x007d040d, &speed_dampeners[1]);
+	PATCH_UINT32(0x007d047a, &speed_dampeners[2]);
+	PATCH_UINT32(0x007d0fd4, &speed_dampeners[3]);
+	PATCH_UINT32(0x007d0fdc, &speed_dampeners[4]);
+	PATCH_UINT32(0x007d1743, &speed_dampeners[5]);
+	PATCH_UINT32(0x007d1779, &speed_dampeners[6]);
+	PATCH_UINT32(0x007d1cac, &speed_dampeners[7]);
+	PATCH_UINT32(0x007d2133, &speed_dampeners[8]);
 }
 
 // function at 00871970, not essentially game tick
@@ -800,9 +796,6 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 		tick_count++;
 		#endif
 	}
-	if(config.max_framerate > 0 && !should_limit){
-		sleep(0);
-	}
 	pthread_mutex_unlock(&config_mutex);
 
 	uint8_t fps_limiter_toggle_orig = ctx->fps_limiter_toggle;
@@ -852,7 +845,7 @@ static void hook_game_tick(){
 		0x90, 0x90
 	};
 	memcpy((void *)&intended_patch[1], (void *)&patched_function_location, 4);
-	memcpy((void *)0x0089f400, intended_patch, sizeof(intended_patch));
+	patch_memory((uint8_t *)0x0089f400, intended_patch, sizeof(intended_patch));
 }
 
 static void patch_min_frametime(double min_frametime){
