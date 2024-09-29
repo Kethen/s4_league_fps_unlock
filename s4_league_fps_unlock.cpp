@@ -544,6 +544,8 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 	// various fixes
 
 	float y = param_2;
+	static float scythe_time = 0;
+
 	// in air
 	if(ret_addr == (void*)0x0052c487){
 		// fly
@@ -579,13 +581,47 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 			LOG_VERBOSE("%s: applying fly speed fix, y %f, y/param_2 %f", __FUNCTION__, y, modifier);
 		}
 
+
 		// scythe uppercut
 		if(actx->actor_state == 63){
-			// approx, would allow different servers with different lua values to work
+			// approx, would allow different servers with different lua values to work, that is if this is tuned in lua at all...
 			if(param_2 > 0){
-				y = param_2 * (1.0 - 0.15 * std::abs(16.0 - frametime) / 6.0);
+				float frametime_ratio = 17.0 / frametime;
+				if(frametime <= 13.0){
+					// >= 70 fps ish
+					float estimated_y_ratio = frametime_ratio / (1/3.75);
+					y = param_2 / estimated_y_ratio * frametime_ratio;
+				}else if(frametime >= 33){
+					// <= 30 fps ish
+					float estimated_y_ratio = frametime_ratio / 4.0;
+					y = param_2 / estimated_y_ratio * frametime_ratio;
+				}else if(frametime >= 28.0){
+					// <= 35 fps ish
+					float estimated_y_ratio = frametime_ratio / 3.0;
+					y = param_2 / estimated_y_ratio * frametime_ratio;
+				}else if(frametime >= 25.0){
+					// <= 40 fps ish
+					float estimated_y_ratio = frametime_ratio / 2.25;
+					y = param_2 / estimated_y_ratio * frametime_ratio;
+				}else if(frametime >= 22.0){
+					// <= 45 fps ish
+					float estimated_y_ratio = frametime_ratio / 2.0;
+					y = param_2 / estimated_y_ratio * frametime_ratio;
+				}else if(frametime >= 19.0){
+					// <= 50 fps ish
+					float estimated_y_ratio = frametime_ratio / 1.75;
+					y = param_2 / estimated_y_ratio * frametime_ratio;
+				}else if(frametime >= 18.0){
+					// <= 55 fps ish
+					float estimated_y_ratio = frametime_ratio / 1.5;
+					y = param_2 / estimated_y_ratio * frametime_ratio;
+				}
 			}
-			LOG_VERBOSE("%s: applying scythe uppercut speed fix, y %f, y/param_2 %f, scythe_time %u", __FUNCTION__, y, y / param_2, scythe_time);
+
+			LOG_VERBOSE("%s: applying scythe uppercut speed fix, y %f, param_2 %f, frametime %f, scythe_time %f", __FUNCTION__, y, param_2, frametime, scythe_time);
+			scythe_time += frametime;
+		}else{
+			scythe_time = 0;
 		}
 
 		// not the best way to identify a PS, but I don't see any other weapons using a -50000 drop value in lua
@@ -610,6 +646,8 @@ void __attribute__((thiscall)) patched_move_actor_by(struct move_actor_by_ctx *c
 		}else{
 			first_ps_drop_frame = true;
 		}
+	}else{
+		scythe_time = 0;
 	}
 
 	// on ground
