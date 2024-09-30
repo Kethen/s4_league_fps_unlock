@@ -737,8 +737,13 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 
 	static struct time_context tctx;
 
+	struct game_context *ctx = fetch_game_context();
+	LOG_VERBOSE("game context at 0x%08x", (uint32_t)ctx);
+
+	bool should_limit = ctx->fps_limiter_toggle != 0;
+
 	pthread_mutex_lock(&config_mutex);
-	if(config.max_framerate > 0){
+	if(config.max_framerate > 0 && should_limit){
 		static struct timespec last_tick = {0};
 		struct timespec this_tick;
 		clock_gettime(CLOCK_MONOTONIC, &this_tick);
@@ -788,11 +793,10 @@ void __attribute__((thiscall)) patched_game_tick(void *tick_ctx){
 	}
 	pthread_mutex_unlock(&config_mutex);
 
-	struct game_context *ctx = fetch_game_context();
-	LOG_VERBOSE("game context at 0x%08x", (uint32_t)ctx);
+	uint8_t fps_limiter_toggle_orig = ctx->fps_limiter_toggle;
 	ctx->fps_limiter_toggle = 0;
-
 	orig_game_tick(tick_ctx);
+	ctx->fps_limiter_toggle = fps_limiter_toggle_orig;
 
 	update_time_delta(&tctx);
 
